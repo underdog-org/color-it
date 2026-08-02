@@ -8,7 +8,7 @@
 
 ### 第一優先｜Android（原 E4 ＋ I2）
 
-移出 v1 的理由：單人配置下，Compose 版四條路由 ＋ Play Billing ＋ Auto Backup 至少 4–6 週，而 v1 的核心假設（有沒有人付錢）在 iOS 上就能驗證。
+移出 v1 的理由：單人配置下，Compose 版五條路由 ＋ Play Billing ＋ Auto Backup 至少 4–6 週，而 v1 的核心假設（有沒有人付錢）在 iOS 上就能驗證。
 
 **v1 已經為它付的預付款**：
 

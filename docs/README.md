@@ -10,8 +10,9 @@
 |---|---|---|
 | [prd.md](./prd.md) | **要做什麼、為什麼** — 產品定位、原則、體驗、範圍 | 567 行 |
 | [architecture.md](./architecture.md) | **怎麼做** — 技術選型、分層、渲染、契約、持久化 | 1368 行 |
-| [roadmap/](./roadmap/README.md) | **什麼時候做、做完怎麼算** — 11 個里程碑 ＋ 決策點 | 每份 38–90 行 |
+| [roadmap/](./roadmap/README.md) | **什麼時候做、做完怎麼算** — 12 個里程碑 ＋ 決策點 | 每份 38–90 行 |
 | [specs/assets-spec.md](./specs/assets-spec.md) | 繪師交付規格（PNG ＋ meta.json 硬性要求） | 319 行 |
+| [specs/build-infra.md](./specs/build-infra.md) | workspace 佈局、依賴 lint 規則、CI 形狀（M0 基建） | 109 行 |
 
 `roadmap/` 已全部拆檔，一次只讀需要的那一份。
 
@@ -45,7 +46,8 @@
 | 動 baker、`.colorpack` 格式 | `§9` 資產管線 ＋ `specs/assets-spec.md` |
 | 動 iOS 整合、手勢、frame pacing | `§10` 平台整合 |
 | 動 R2、備份、雲端 | `§11` 雲端 |
-| 動 CI / 建置流程 | `§12` 建置與 CI |
+| 動 CI / 建置流程 | `§12` 建置與 CI ＋ `specs/build-infra.md` |
+| 動 workspace 骨架、依賴 lint、xtask 指令 | `specs/build-infra.md` |
 | 效能目標、量測 | `§13` 效能觀測 |
 | 風險與退路 | `§14` |
 
@@ -56,6 +58,7 @@
 | 當前該做什麼、DoD 是什麼 | `roadmap/<當前里程碑>.md` ★ |
 | 週次總表、里程碑相依圖 | `roadmap/README.md` |
 | D1–D8 該量什麼、外部前置 lead time、單人專案的風險 | `roadmap/checkpoints.md` |
+| 為什麼是這個排法（繪師為何延到 W16、S0 為何還要做） | `roadmap/strategy.md` |
 | Android 何時做、v1 之後 | `roadmap/beyond-v1.md` |
 
 ---

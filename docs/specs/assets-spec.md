@@ -1,8 +1,8 @@
 # Color It — 素材交付規格
 
 > 給繪師的交付規格。
-> 狀態：v1
-> 相關文件：[architecture.md §9](./architecture.md)｜[prd.md](./prd.md)
+> 狀態：v1.0（2026-08-03 定稿）
+> 相關文件：[architecture.md §9](../architecture.md)｜[prd.md](../prd.md)
 
 ---
 
@@ -287,6 +287,8 @@ anime-girl-face/
 | 專注 | > 200 | 30 分鐘以上，適合曼陀羅這類 |
 
 難度由程式依區域數自動判定，你不需要指定。但接稿時我們會說明這張要哪一種難度。
+
+> 這張表的數字是全專案的唯一依據——`architecture.md §9.4` 與 `roadmap/M1.md` 都只是引用它。若要調整門檻，三處必須一起改。
 
 **Q：相鄰的兩塊可以用同一個顏色嗎？**
 

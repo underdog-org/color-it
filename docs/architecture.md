@@ -1,7 +1,7 @@
 # Color It — 架構設計文件
 
-> 狀態：草案 v0.2
-> 相關文件：[prd.md](./prd.md)｜[roadmap/](./roadmap/README.md)
+> 狀態：草案 v0.1（2026-08-03）
+> 相關文件：[prd.md](./prd.md)｜[roadmap/](./roadmap/README.md)｜[assets-spec.md](./specs/assets-spec.md)
 
 > **v1 平台範圍：iOS only。**
 > 本文件中所有 Android 相關的規格（Compose、`SurfaceView`、`Choreographer`、Auto Backup、Vulkan / GLES）**全部保留為未來規格**，v1 不實作。
@@ -69,7 +69,7 @@
 - 畫布是原生 surface。CMP on iOS 自行渲染進 Skia-backed `UIView`，在其中嵌 `CAMetalLayer` 並讓高頻觸控穿過 Compose 事件系統，每一層都在增加延遲。
 - `predictedTouches`、`coalescedTouches`、`altitudeAngle` 等 UIKit 專屬資料會在抽象層被抹平或延遲。
 - frame pacing 機制兩邊本就不同（`CADisplayLink` vs `Choreographer`），共用抽象沒有實益。
-- 本產品的 UI chrome 很小（四條路由），共用省下的時間不是成本大頭。
+- 本產品的 UI chrome 很小（五條路由），共用省下的時間不是成本大頭。
 - **已經有 Rust 核心的情況下，再加 KMP 等於 iOS 上背兩套 runtime。**
 
 ---
@@ -80,7 +80,7 @@
 ┌──────────────────────────────────────────────────────────────┐
 │  App Shell                                                    │
 │  SwiftUI (iOS)                    │  Compose (Android)        │
-│  Gallery / Canvas / Share / Subscription                      │
+│  Gallery / Canvas / Share / Subscription / Settings           │
 ├──────────────────────────────────────────────────────────────┤
 │  Platform Bridge（各平台一份，不共用）                          │
 │  ├─ EngineProtocol   介面定義（Shell 只依賴這個）               │
@@ -128,15 +128,15 @@ color-it/
 │
 ├─ contracts/             ★ 跨語言／跨版本／跨工具的獨立規格
 │  ├─ colorpack.schema.json
-│  ├─ oplog.schema.json
-│  └─ tokens.json
+│  └─ oplog.schema.json
+│                         （tokens.json 移出 v1，見 §7）
 │
 ├─ tools/
 │  └─ baker/              資產烘焙 CLI
 │
 ├─ apps/
 │  ├─ ios/
-│  │  ├─ ColorApp/                 SwiftUI：Gallery / Canvas / Share / Subscription
+│  │  ├─ ColorApp/                 SwiftUI：Gallery / Canvas / Share / Subscription / Settings
 │  │  ├─ EngineBridge/    ★ Platform Bridge（獨立 framework target）
 │  │  │   ├─ EngineProtocol.swift
 │  │  │   ├─ RustEngine.swift
@@ -167,7 +167,10 @@ color-it/
 │  ├─ prd.md
 │  ├─ architecture.md
 │  ├─ roadmap/                     索引 ＋ 每個里程碑一份 ＋ checkpoints
-│  └─ contracts.md                 （待補：等 UDL 與 schema 成形後撰寫）
+│  ├─ perf-baseline.md             （E1 產出）
+│  ├─ contracts.md                 （S0 產出，見 `roadmap/S0.md`）
+│  └─ specs/
+│     └─ assets-spec.md            ★ 給繪師的交付規格
 │
 └─ xtask/                          建置協調
 ```
@@ -235,6 +238,8 @@ color-it/
 **Undo pool 必須有記憶體上限。** 一筆畫可能碰到 4–16 個 256×256 tile（RGBA8 每 tile 256KB），即 1–4MB／步。若不設限，20 步就可能吃掉 80MB，而使用者可以連續畫數百筆。
 
 > **規則**：undo pool 設 64MB 上限，超過時丟棄最舊的 entry——**undo 深度是動態的**，複雜筆畫的可撤銷步數比簡單筆畫少。這比固定步數更符合記憶體現實。
+>
+> **深度動態意味著 UI 不能顯示固定步數**：Undo 按鈕的可用狀態必須反映 pool 的實際內容（entry 被丟棄後就不可撤銷），而不是一個假設的步數上限。`UiState` 據實回報，驗收見 `roadmap/E3.md`。
 
 這份預算是 **E1 的驗收目標**（`roadmap/checkpoints.md` D4）。若真機量測超標，此時調整畫布解析度的代價最低——繪師尚未量產，且母帶是 4096 長邊，重新降採樣即可，不需要繪師返工。
 
@@ -305,6 +310,35 @@ target 1: T_erase  ← additive       （擦掉底色）
 兩者皆受 Mode B mask
 ```
 
+**(d) 邊緣加成（`edge_boost > 0` 時套用，目前只有水彩）**
+
+這不是第四條路徑，而是套在 (a)/(b) 之上的一個係數。
+
+「水彩邊緣暈染加深」是 **per-stroke** 的效果——整筆的**外緣**變深，內部不變。它做不到的原因是 `tip` 是 per-dab 貼圖，而「這一筆的外緣在哪」只有在整筆畫完之後才知道。
+
+**commit 的時機正好就是那個「之後」**：`T_wet` 在此刻已經是整筆完整的 coverage。所以只需要在 commit shader 內對 `T_wet` 做一次 unsharp：
+
+```wgsl
+let w    = textureLoad(T_wet, coord).r;
+let blur = box3x3(T_wet, coord);            // 3×3，半徑隨 brush size 縮放
+let edge = max(w - blur, 0.0);              // 筆畫外緣為正，內部趨近 0
+let a    = saturate(w * (1.0 + edge * preset.edge_boost));
+```
+
+`w - blur` 在濃度平坦的筆畫內部趨近 0，只有在 coverage 由高轉低的外緣才有正值——這正是水彩的乾涸邊界（backrun）的位置。
+
+**為什麼這條路便宜**：
+
+| 項目 | 代價 |
+|---|---|
+| 新的 pass | **無**——寫在既有的 commit shader 裡 |
+| 新的貼圖資源 | **無**——只讀已存在的 `T_wet` |
+| 執行頻率 | 抬筆時一次，且只跑 stroke bbox |
+| `BrushPreset` | 多一個 `edge_boost: f32`，其餘四支設 0 |
+| OpLog / Undo | **零影響**——它只改變 commit 的輸出值 |
+
+**已知限制**：3×3 鄰域的擴散半徑很小，在大筆刷下邊緣會顯得過細。若 D5 盲測認為不夠，第一個調整是讓 blur 半徑隨 `brush size` 縮放（已寫在上方註解），第二個是改用兩趟 separable blur。**若兩者都不足以做出辨識度，依 §14 R7 砍成四支筆刷。**
+
 **所有路徑共同的收尾**：
 
 ```
@@ -355,7 +389,7 @@ Composite 成本低，每 frame 全畫面重跑即可。真正的成本在 Strok
 | # | 效果 |
 |---|---|
 | 1 | **筆內不疊暗**——自交、慢速、來回塗抹，濃度一致 |
-| 2 | **`opacity` 語意正確**——它是整筆的上限 |
+| 2 | **`opacity` 語意正確**——它是整筆的上限（`BrushPreset.opacity` 是預設值，可被 `Tool::Brush.opacity` 覆寫，見 §6 Boundary 1） |
 | 3 | **遮罩只算一次**——commit 時算，不是每個 dab 都算 |
 | 4 | **進行中的筆畫可無痛取消**——palm rejection 事後判定失敗或使用者取消，直接清空 `T_wet`，`T_paint` 從未被污染 |
 | 5 | **Undo 粒度正確**——一筆 = 一個 undo entry，dirty tile 只快照一次 |
@@ -422,25 +456,26 @@ pub struct BrushPreset {
     pub jitter_angle: f32,
     pub blend: BlendMode,              // Normal / Multiply
     pub flow: f32,                     // 單 dab 濃度
-    pub opacity: f32,                  // 整筆上限
+    pub opacity: f32,                  // 整筆上限的預設值，可被 Tool::Brush.opacity 覆寫
     pub build_up: bool,                // 同筆內是否疊加
+    pub edge_boost: f32,               // commit 時的邊緣加成，見 §4.2 (d)。0 = 不套用
 }
 ```
 
-| Preset | tip | spacing | blend | build_up |
-|---|---|---|---|---|
-| 軟圓筆 | 軟圓 | 0.05 | Normal | false |
-| 麥克筆 | 硬圓 | 0.04 | Multiply | false |
-| 蠟筆 | 顆粒紋理 | 0.08 | Normal | false |
-| 噴槍 | 大軟圓 | 0.02 | Normal | **true** |
-| 水彩 | 軟圓＋邊緣強化 | 0.06 | Multiply | **true** |
+| Preset | tip | spacing | blend | build_up | edge_boost |
+|---|---|---|---|---|---|
+| 軟圓筆 | 軟圓 | 0.05 | Normal | false | 0 |
+| 麥克筆 | 硬圓 | 0.04 | Multiply | false | 0 |
+| 蠟筆 | 顆粒紋理 | 0.08 | Normal | false | 0 |
+| 噴槍 | 大軟圓 | 0.02 | Normal | **true** | 0 |
+| 水彩 | 軟圓 | 0.06 | Multiply | **true** | **> 0**（初值待 E2 調校） |
 
 **兩支筆刷的實作風險要先寫下來**：
 
 | Preset | 風險 |
 |---|---|
 | **麥克筆** | Multiply 白色 = 原色，所以**在未上色的白底上，麥克筆與軟圓筆看起來完全一樣**。它的辨識度完全依賴使用者先鋪底。D5 盲測**必須在已鋪底的畫布上進行**，否則會誤判它沒有辨識度而砍掉 |
-| **水彩** | 「邊緣暈染加深」是 **per-stroke** 的效果（整筆的外緣變深），但 `tip` 是 **per-dab** 的貼圖——兩者不是同一件事。要做出真正的水彩邊緣，需要在 commit 時對 `T_wet` 取鄰域算梯度，這條路徑目前尚未設計。**這是五支裡最可能做不出辨識度的一支**，見 §14 R7 |
+| **水彩** | 「邊緣暈染加深」是 **per-stroke** 的效果，但 `tip` 是 **per-dab** 的貼圖——兩者不是同一件事。實作路徑已定案（commit 時對 `T_wet` 做 unsharp，見 §4.2 (d)），但**辨識度是否足夠仍未驗證**。這是五支裡風險最高的一支，退路見 §14 R7 |
 
 ### 4.7 進度計算
 
@@ -465,6 +500,15 @@ if (textureLoad(T_paint, coord).a > 0.5) {
 3. **readback 走非同步** —— 與 §14 R6 的 undo readback **共用同一套 ring buffer ＋ fence**
 
 第 3 點是重點：這套非同步 readback 基礎設施本來就必須為 undo 而建，因此進度計算的邊際成本只是「多一個 compute shader」，不是「多一套機制」。兩者應在 E3 一起設計。
+
+**★ undo 之後覆蓋率必須回退。** 上面三條只描述了前進方向，但進度是可逆的——撤銷一筆之後覆蓋率不能停在高點。兩種 `UndoEntry` 各有便宜的回退路徑：
+
+| Undo entry | 回退方式 | 成本 |
+|---|---|---|
+| `PaintTiles` | `tile_ids` 已記錄受影響的 tile，把它們重新標為 dirty，重算這些 tile 的 per-region counter 增量並套用差值 | 與該筆畫的 tile 數同階，**不是全圖重算** |
+| `Fill` | region 級操作，直接把該 region 的 counter 回滾到填色前的值 | 純 CPU，不碰 GPU |
+
+換言之，覆蓋率統計是「以 tile 為單位的增量累加」，undo 只是套用一個負增量。實作與驗收見 `roadmap/E3.md`。
 
 ---
 
@@ -575,7 +619,8 @@ One-Euro filter 的參數需實機調校：太強會有「拖尾感」，太弱�
 Engine::new(surface: RawSurfaceHandle, pack: PathBuf, doc: Option<PathBuf>) -> Engine
 
 // 工具
-fn set_tool(&self, tool: Tool);           // Brush{preset,color,size} | Eraser | Bucket{color}
+fn set_tool(&self, tool: Tool);
+fn pick_color(&self, x: f32, y: f32) -> Rgba;   // 吸管：讀 composite 結果的單點顏色
 
 // 輸入（唯一高頻路徑）
 fn begin_stroke(&self, s: InputSample);
@@ -600,6 +645,21 @@ fn save(&self) -> Result<()>;
 fn export_png(&self) -> Vec<u8>;
 fn export_timelapse(&self) -> Vec<u8>;
 ```
+
+**`Tool` 的正式定義**（`set_tool` 的唯一入口型別）：
+
+```rust
+pub enum Tool {
+    Brush { preset: BrushId, color: Rgba, size: f32, opacity: Option<f32> },
+    Eraser { size: f32 },
+    Bucket { color: Rgba },
+}
+```
+
+- **`opacity: Option<f32>` 是使用者對整筆上限的覆寫**，`None` 表示沿用 `BrushPreset.opacity`（§4.6）。這是**單一數值的覆寫，不是把 preset 開放給使用者編輯**——`prd.md` 的 Don't Have 仍禁止後者，其餘參數（`flow`、`spacing`、曲線、jitter…）永遠只由 preset 決定。產品定義見 `prd.md §5.2`，排程在 E2。
+- **`Eraser` 帶 `size`**，與 Boundary 5 的 `Op::EraseStroke { preset, size, seed }` 一致。
+
+**`pick_color` 的實作註記**（產品定義見 `prd.md §4.4`，排程在 S1）：單像素 readback，只在抬筆／點擊時觸發，不是高頻路徑，可直接走 §14 R6 那套既有的 async readback ring buffer。**不要為它開任何新的 GPU 資源跨界通道**——Boundary 1 的第 1 條紅線不變，Native 拿到的永遠是一個 `Rgba` 值，不是貼圖或 buffer。
 
 ### Boundary 2｜`stroke` ↔ `render`
 
@@ -634,13 +694,15 @@ impl Document {
 
 ```rust
 pub enum Op {
-    BeginStroke { preset: BrushId, color: Rgba, size: f32, seed: u32 },
+    BeginStroke { preset: BrushId, color: Rgba, size: f32, opacity: Option<f32>, seed: u32 },
     StrokeSamples { samples: Vec<QuantizedSample> },   // 量化，見 §8.2
     EndStroke,
     Fill { region: u16, color: Rgba },                 // 順帶清該區的 T_erase
     EraseStroke { preset: BrushId, size: f32, seed: u32 },
 }
 ```
+
+`BeginStroke.opacity` 是使用者對整筆上限的覆寫（`None` 表示沿用 preset 預設值）。**它必須記進 oplog**——否則縮時重播與備份還原會以 preset 預設值重繪，濃度與原作不符，而且正是上一段說的那種靜默失敗。
 
 **沒有 `Undo` / `Redo` op。** 這是刻意的，理由見 Boundary 6。
 
@@ -741,9 +803,18 @@ App 重啟後 undo stack 是空的。三個理由：
 | FFI 型別與函式 | **Rust**（`core/engine`） | uniffi 生成 Swift ＋ Kotlin | 跨語言，uniffi 的正職 |
 | `.colorpack` 格式 | **`contracts/colorpack.schema.json`** | 手寫規格 ＋ Rust 驗證 | 跨的是 baker ↔ runtime ↔ 外部工具鏈，不是跨語言 |
 | Ops-Log schema | **`contracts/oplog.schema.json`** | 手寫規格 ＋ Rust 驗證 | 跨的是**版本**（v1 App 要能讀 v3 的檔）。uniffi 沒有向前相容概念 |
-| Design tokens | **`contracts/tokens.json`** | 生成 Swift / Kotlin / CSS 常數 | 跨 SwiftUI / Compose / web 三端 |
 
 `contracts/` **只放 uniffi 生不出來的東西**。FFI 型別不進 `contracts/`——那會製造第二份真相。
+
+### Design tokens 移出 v1
+
+v0.2 把 `contracts/tokens.json` 列為第四份契約，生成 Swift / Kotlin / CSS 三份常數。**v1 不做。**
+
+契約層的成本只有在有第二個消費端時才回本。v1 是 iOS only，唯一的消費端是 SwiftUI；`apps/web` 是一個靜態行銷頁，用到的顏色只有幾個，手動同步的成本遠低於維護一條生成管線。為了「架構完整」而建一條單端的生成管線，正是 P2 的反面。
+
+**v1 的作法**：`apps/ios/ColorApp/DesignTokens.swift`，手寫常數，單一真相。
+
+**升級時機**：Android 版開工時抽成 `contracts/tokens.json`。屆時 `DesignTokens.swift` 變成生成產物，Shell 端引用方式不變——所以現在寫成常數不會製造未來的遷移債。
 
 ### FFI semver 規則
 
@@ -893,13 +964,57 @@ undo 之後必須觸發一次這樣的寫入，否則「undo → 崩潰 → 重�
 
 ### 9.1 繪師交付規格
 
-每張線稿交付三個檔案，同尺寸、同對齊：
+每張線稿交付**四個 PNG ＋ 一份 `meta.json`**。四個 PNG 必須同尺寸、同對齊，且**從同一個來源檔的不同圖層導出**——分別新建畫布必然錯位。
 
 | 檔案 | 內容 | 硬性要求 |
 |---|---|---|
-| `lineart.png` | 線稿，透明背景 | **抗鋸齒開啟**，RGBA |
-| `flats.png` | 塗り分け（分色圖），每個封閉區域一個唯一純色 | **抗鋸齒關閉**（硬邊）、無漸層、無縫隙 |
-| `shade.png`（選配） | 陰影 / 質感，供 Multiply 疊加 | 抗鋸齒開啟 |
+| `lineart.png` | 線稿，透明背景 | **抗鋸齒開啟**，RGBA，背景須為真透明（導出時不得填白） |
+| `flats.png` | 塗り分け（分色圖），每個封閉區域一個唯一純色 | **抗鋸齒關閉**（硬邊）、無漸層、無縫隙、**不透明且全覆蓋**（見 §9.3） |
+| `reference.png` | **建議配色稿**——`flats` 的換色版：同幾何，每區填的是真正的建議顏色 | 同 `flats`（抗鋸齒關閉、不透明、全覆蓋），且**區域邊界須與 `flats` 完全一致** |
+| `shade.png`（選配） | 陰影 / 質感，供 Multiply 疊加 | 抗鋸齒開啟。**可交付透明背景，由 baker 合成到白底** |
+| `meta.json` | 只有人知道、baker 推導不出來的欄位 | 見下 |
+
+**原始分層檔（`.clip` 等）不進 repo**，由繪師自行保管至該作品下架為止——repo 只放與素材本身相關的 PNG，工具中立才能換繪師。代價是區域切分日後要調整時，重畫成本落在繪師身上，**這件事必須在合作前講明**。
+
+#### `flats` 與 `reference` 為什麼是兩張圖
+
+兩張圖幾何完全相同，作為資料高度冗餘——實際承載的新資訊只有 N 個顏色（N = 區域數）。但它們回答不同的問題，而且**改動後果的量級不同**：
+
+| | `flats.png` | `reference.png` |
+|---|---|---|
+| 回答的問題 | **哪裡是同一塊**（幾何） | **這塊該是什麼顏色**（語意） |
+| 顏色的意義 | 識別碼。選色標準是「肉眼分得出漏塗」 | 真的顏色。選色標準是「好看」 |
+| 改動的後果 | 區域切分改變 → `asset_hash` 變更 → 觸發 §8.4 的版本失效 | **無破壞性**，只影響建議色盤 |
+
+合併成一張，等於每次微調一個顏色都會讓既有文件失效。
+
+分離同時消滅了「相鄰同色區域被 connected components 合併」的問題——臉與脖子在 `reference` 裡可以塗同一個膚色，在 `flats` 裡仍是兩個獨立 ID。
+
+> 若日後嫌 PNG 笨重，可改為 `ID 色 hex → 建議色 hex` 的對照表（體積小三個量級）。這個決策**可逆**：只換 baker 讀色的那一段，`.colorpack` 格式不變。目前選 PNG 的唯一理由是**配色是視覺決策**——hex 表看不出一組色搭不搭。
+
+#### `meta.json`
+
+```json
+{
+  "id": "anime-girl-window",
+  "title": "窗邊的少女",
+  "category": "anime",
+  "notes": "頭髮刻意分成三束，測試相鄰同色區域"
+}
+```
+
+| 欄位 | 用途 | 必填 |
+|---|---|---|
+| `id` | **永久識別碼**。小寫 kebab-case、純 ASCII（會直接成為 R2 object key）。baker 驗證它與資料夾名一致 | ✅ |
+| `title` | **內部識別用，單語即可**——`prd.md §5.1` 的 Gallery 卡片不顯示線稿名稱，v1 無資產 i18n 管線 | ✅ |
+| `category` | `anime` / `mandala` / `animal` / `botanical` / `scenery`，baker 拒收未知值 | ✅ |
+| `notes` | 給人看的備註，baker 完全忽略 | ⬜ |
+
+**`id` 為什麼要與資料夾名重複一次**：資料夾改名時 baker 會報錯，而不是靜默產生一張新圖讓既有文件孤兒化——正是 P1 要防的失敗。`id` 是識別碼不是名稱，想改名時改 `title`，`id` 永遠不動。
+
+**`aspect` 為什麼不在裡面**：它從尺寸即可推導，寫進來會製造第二份真相。冗餘校驗的價值與失敗的**隱蔽程度**成正比——`id` 寫錯是靜默且災難性的，`aspect` 寫錯打開圖就看到。
+
+**免費/付費為什麼不在裡面**：它隨行銷調整而變，但 `.colorpack` 一經發布不可變（§9.4）。它屬於 R2 上的圖庫目錄 JSON（§11.2），那份是可變的。
 
 #### 解析度與比例（硬性規格）
 
@@ -908,6 +1023,9 @@ undo 之後必須觸發一次這樣的寫入，否則「undo → 崩潰 → 重�
 | **交付母帶** | **長邊 4096** |
 | 比例 | **1:1（4096×4096）或 4:5（3072×4096）**，二選一 |
 | runtime 尺寸 | 由 baker 降採樣產生：1:1 → 2048²、4:5 → 1536×1920 |
+| **色彩空間** | **sRGB，8-bit/channel。導出時不得選 Display P3** |
+
+> **★ 色彩空間是這條管線最陰險的一個陷阱。** 若 `flats.png` 被 color-managed 從 Display P3 轉換到 sRGB，每個 ID 色都會被改成鄰近色——結果是憑空多出一批區域，而症狀要到 baker 報告區域數異常時才會浮現，且極難回溯成因。**導出時色彩描述檔一律選 sRGB。**
 
 **為什麼要求母帶高於 runtime**：runtime 解析度是一個尚未定案的工程參數（要等 E1 的記憶體量測，見 §4.1.1）。若繪師直接交付 runtime 尺寸，日後任何解析度調整都需要繪師**逐張返工**——而 `flats` 不能用一般縮放，返工成本極高。
 
@@ -917,7 +1035,7 @@ undo 之後必須觸發一次這樣的寫入，否則「undo → 崩潰 → 重�
 
 **`flats.png` 是整條管線的關鍵前提。**
 
-它是動畫與漫畫產線的標準交付物，CSP 繪師普遍熟悉（「囲って塗る」工具，或「自動選択（隙間閉じ 開）＋ 塗りつぶし，アンチエイリアスなし」）。每張圖約增加 10–20 分鐘工時。
+它是動畫與漫畫產線的標準交付物，CSP 繪師普遍熟悉（「囲って塗る」工具，或「自動選択（隙間閉じ 開）＋ 塗りつぶし，アンチエイリアスなし」）。每張圖約增加 10–20 分鐘工時，`reference.png` 再加約 5–10 分鐘（複製圖層、逐區換色）。
 
 **沒有 flats 的代價**：必須從抗鋸齒線稿自動做 gap closing ＋ 區域切割，需要大量啟發式參數且每張圖需人工修正——這會是整個專案最大的時間黑洞。**與繪師建立這個交付習慣，價值高於任何工程優化。**
 
@@ -930,12 +1048,13 @@ undo 之後必須觸發一次這樣的寫入，否則「undo → 崩潰 → 重�
    ├─ Connected components → region ID
    ├─ 前置驗證（見 9.3，在母帶解析度）
    │
+   ├─ ★ lineart / shade 合成到白底           ← 必須在降採樣「之前」
    ├─ ★ 降採樣至 runtime 尺寸（三種濾波器，見下）
    │
    ├─ ★ 區域向線稿下方膨脹 2px      ← 必須在降採樣「之後」
    ├─ 後置驗證（見 9.3，在輸出解析度）
-   ├─ 從 flats 顏色推導建議調色盤
-   └─ 依 region_count 計算難度分級
+   ├─ 從 reference.png 逐區讀取建議調色盤（在母帶解析度）
+   └─ 依 region_count 計算難度分級（門檻見 §9.4）
         │
         ▼
    .colorpack
@@ -943,7 +1062,17 @@ undo 之後必須觸發一次這樣的寫入，否則「undo → 崩潰 → 重�
 
 #### ★ 三個順序與濾波器的陷阱
 
-**(1) 三張圖必須用不同的降採樣濾波器**
+**(0) `lineart` 與 `shade` 都必須先合成到白底**
+
+Composite（§4.2 Pass 3）對這兩張是**純 RGB 相乘**：`color * textureSample(T_line)`。straight-alpha 的 RGBA 貼圖在透明處 RGB 通常是 0，直接相乘會把整張畫布乘成黑色。
+
+合成必須在**降採樣之前**：先合成到白底再用 box filter 降採樣，邊緣的抗鋸齒才是正確的；反過來對 straight-alpha 直接降採樣會在邊緣產生錯誤顏色。
+
+這也讓繪師端的規格變寬鬆——`shade` 交白底或透明底都可以（`docs/specs/assets-spec.md §4.4`）。
+
+**(1) 進入 runtime 的三張圖必須用不同的降採樣濾波器**
+
+（`reference.png` **不降採樣、也不進 `.colorpack`**——它只在母帶解析度被讀一次以取得建議色，之後即無用。）
 
 | 檔案 | 濾波器 | 為什麼 |
 |---|---|---|
@@ -973,16 +1102,22 @@ baker 必須**拒絕收檔**而非產出有問題的資產：
 
 | 檢查 | 時機 | 失敗行為 |
 |---|---|---|
-| 三張圖尺寸與對齊一致 | 母帶 | 錯誤 |
+| 四張圖尺寸與對齊一致 | 母帶 | 錯誤 |
 | 長邊為 4096，比例為 1:1 或 4:5 | 母帶 | 錯誤 |
+| **色彩空間為 sRGB**（無 Display P3 描述檔） | 母帶 | 錯誤 |
 | flats 無抗鋸齒（顏色數在合理範圍） | 母帶 | 錯誤 |
-| 無未指派像素（線稿覆蓋處除外） | 母帶 ＋ **輸出** | 錯誤 |
+| **無未指派像素（無例外，含線稿覆蓋處）** | 母帶 ＋ **輸出** | 錯誤 |
+| **`reference` 與 `flats` 的區域邊界完全一致** | 母帶 | 錯誤 |
+| **`reference` 每個區域內顏色唯一**（無漸層、無抗鋸齒殘留） | 母帶 | 錯誤 |
+| `meta.json` 的 `id` 與資料夾名一致、`category` 為已知值 | 母帶 | 錯誤 |
 | 碎片區域（面積 < 200px） | **輸出** | 警告 ＋ 列出座標 |
 | 降採樣後區域數與母帶一致 | **輸出** | 錯誤——代表有區域被降採樣吃掉 |
 | 區域數在合理範圍 | 輸出 | 警告 |
 | region_count ≤ 65535（`R16Uint` 上限） | 輸出 | 錯誤 |
 
-**寧可在 baker 階段拒絕，也不要讓問題在 runtime 才以「漏色」的形式出現。** runtime 的漏色極難回溯到是哪張圖的哪個區域出問題。
+**「無未指派像素」為什麼收緊成無例外**：v0.2 原本允許線稿覆蓋處未指派。改動的理由是成本不對稱——CSP 的「囲って塗る」預設就會填到線稿下方，繪師成本近乎零；而驗證邏輯從「判斷這個未指派像素是否落在線稿下」簡化成「掃到任何非 ID 色的像素就報錯」，同時消滅了白邊的一個來源。
+
+**寧可在 baker 階段拒絕，也不要讓問題在 runtime 才以「漏色」的形式出現。** runtime 的漏色極難回溯到是哪張圖的哪個區域出問題——這也是 `asset_id` 採用可讀 slug 而非不透明編號的理由。
 
 ### 9.4 `.colorpack` 格式
 
@@ -995,6 +1130,26 @@ regions.bin      R16 ID map，RLE 無損
 regions.json     [{ id, centroid, area, bbox, suggested_color }]
 thumb.jpg
 ```
+
+**manifest 欄位的來源**：
+
+| 來源 | 欄位 |
+|---|---|
+| `meta.json`（人給） | `id`、`category` |
+| `reference.png` | `palette[]` |
+| baker 推導 | `schema_version`、`content_hash`、`canvas_size`、`aspect`、`region_count`、`difficulty`、`has_shade` |
+
+**`difficulty` 的門檻**（baker 依 `region_count` 推導）：
+
+| difficulty | `region_count` |
+|---|---|
+| 輕鬆 | ≤ 60 |
+| 適中 | 61–200 |
+| 專注 | > 200 |
+
+> **SSOT 在 `specs/assets-spec.md`**（繪師交付規格），此處與 `roadmap/M1.md` 皆為引用。**改門檻必須三處同動。**
+
+`title` 不進 manifest——v1 的 Gallery 不顯示線稿名稱（`prd.md §5.1`），它只是 `meta.json` 裡給人辨識用的欄位。
 
 **`.colorpack` 一經發布即不可變**，由 `content_hash` 標識。修改內容 = 產生新的 pack，舊版本永久保留。
 
@@ -1017,14 +1172,20 @@ thumb.jpg
 ```swift
 protocol EngineProtocol {
     func setTool(_ tool: Tool)
+    func pickColor(x: Float, y: Float) -> Rgba
     func beginStroke(_ s: InputSample)
     func appendSamples(_ s: [InputSample])
     func endStroke()
+    func cancelStroke()
     func tap(x: Float, y: Float)
     func undo(); func redo()
+    func render()
+    func setViewport(_ transform: Transform)
     var state: AnyPublisher<UiState, Never> { get }
     func makeCanvasView() -> UIView
+    func save() throws
     func exportPNG() -> Data
+    func exportTimelapse() -> Data
 }
 
 final class MockEngine: EngineProtocol {
@@ -1035,6 +1196,8 @@ final class MockEngine: EngineProtocol {
 ```
 
 App Shell 只依賴 `EngineProtocol`。引擎完成後把 `MockEngine` 換成 `RustEngine`，Shell 一行不改。
+
+**這份 protocol 必須與 §6 Boundary 1 的 FFI 表面逐項對應。** 少一個方法，就代表 Shell 到 S1 末期切換 `RustEngine` 時得改動——那正是 `roadmap/S0.md`「Mock → RustEngine 時 Shell 端零修改」這條驗收要擋掉的事。FFI 增刪方法時，同步改這裡。
 
 ### 10.2 InputAdapter
 
@@ -1108,35 +1271,51 @@ POST /unlock  { receipt }
 
 無資料庫、無帳號、無 session。仍然完全 serverless。
 
+**三個實作細節**（bucket ＋ 目錄 JSON ＋ ETag 在 S1，Worker 解鎖在 S2）：
+
+- **ETag 快取失效與輪詢頻率**：目錄 JSON 只在 **App 啟動時 ＋ 進 Gallery 時**帶 `If-None-Match` 重抓，不做背景輪詢；304 就直接用本地快取。
+- **presigned URL 過期**：15 分鐘內未下載完成就重新向 Worker 索取一張，**不快取 URL 本身**（快取的是已下載完成的 pack）。
+- **離線情境**：取不到目錄 JSON 時沿用上次快取的版本，**已下載的 pack 一律可開**——呼應 §8.5 的永久釘選。
+
 ### 11.3 使用者資料備份
 
 | | iOS（v1） | Android（未來） |
 |---|---|---|
-| 機制 | 見下方待決策 | Auto Backup for Apps |
+| 機制 | **iCloud Drive ubiquity container**（已拍板） | Auto Backup for Apps |
 | 額外登入提示 | 無（沿用系統 iCloud） | 無 |
 | 容量 | 使用者 iCloud 配額 | **25MB 硬上限** |
 | 還原時機 | 隨時 | 僅裝置初始設定時 |
-| 開發成本 | 見下 | 極低（一份 XML 設定） |
+| 開發成本 | 低—中（見下） | 極低（一份 XML 設定） |
 
 **為什麼 Android 不用 Google Drive App Data**：`drive.appdata` scope 需要 Google OAuth 登入，會出現帳號選擇器與授權畫面——這違反 PRD P4，且與 iOS 端的無感體驗不對等。
 
-> **⚠️ 待決策｜iOS 備份機制：CloudKit vs iCloud Drive**
+#### iOS 備份機制：選 iCloud Drive，不選 CloudKit（已決議）
+
+v0.1 選了 CloudKit 私有資料庫。**改為 iCloud Drive ubiquity container。**
+
+| | CloudKit 私有 DB | **★ iCloud Drive ubiquity container** |
+|---|---|---|
+| 開發成本 | 中——需設計 record type、處理衝突與 sync 狀態 | 低—中（見下方修正） |
+| 手動匯出 | 需另外實作 | **邊際成本近乎零**（見下方時序說明） |
+| 額外登入 | 無 | 無 |
+| 使用者誤刪風險 | 無（不可見） | **有**（可見於檔案 App） |
+| 精細控制 | 高（可查詢、可部分同步） | 低（整包檔案） |
+
+**決定的理由**：本產品的備份需求是「一堆彼此獨立的文件檔」，沒有跨文件的關聯查詢——CloudKit 的能力完全用不上，卻要付它的設計成本。而 iCloud Drive 與手動匯出共用同一種「就是一個檔案」的資料形狀，後者是 P1 的逃生口（`prd.md §8`），這個連帶效果讓它從 Should Have 升為 Must Have。
+
+> **手動匯出不依賴 ubiquity container。** 排程上**手動匯出／匯入在 S2b（W28），iCloud container 設定在 S3（W31 前）**——匯出會早於 container 存在，因此不能假設它已設定好。匯出走系統「檔案」App 的匯出流程（`UIDocumentPicker` / 分享面板），來源是本機文件目錄；**本機文件永遠是真相來源**，所以匯出隨時可行，與 iCloud 是否啟用無關。結論不變：**邊際成本近乎零**——成本只是一個分享面板入口。
+
+> **⚠️ 修正一個先前的低估**：v0.2 寫「檔案放進 container 就自動同步」。這不準確，實際仍需處理三件事：
 >
-> v0.1 選了 CloudKit 私有資料庫。以下是替代方案，**建議在 S3 開始前拍板**。
+> 1. **`NSMetadataQuery` 監聽下載狀態**——換機還原時檔案是 placeholder，必須 `startDownloadingUbiquitousItem` 並等待，不能假設 `FileManager` 讀得到內容
+> 2. **`NSFileVersion` 衝突解析**——兩台裝置同時編輯同一份文件會產生衝突版本。本產品的策略是**保留最後修改者，衝突版本另存不刪除**（P1：不刪除使用者的東西）
+> 3. **`NSFileCoordinator` 包住所有讀寫**——與 §8.3 的 atomic rename 需要一起設計
 >
-> | | CloudKit 私有 DB | **iCloud Drive ubiquity container** |
-> |---|---|---|
-> | 開發成本 | 中——需設計 record type、處理衝突與 sync 狀態 | **低**——檔案放進 container 就自動同步 |
-> | 手動匯出 | 需另外實作 | **免費附贈**（檔案直接出現在「檔案」App） |
-> | 額外登入 | 無 | 無 |
-> | 使用者誤刪風險 | 無（不可見） | **有**（可見於檔案 App） |
-> | 精細控制 | 高（可查詢、可部分同步） | 低（整包檔案） |
->
-> **傾向 iCloud Drive**：單人專案下它同時解決備份與手動匯出兩件事，省下的時間以週計；而本產品的備份需求很單純（一堆獨立文件，沒有跨文件關聯查詢），CloudKit 的能力用不上。
->
-> 誤刪風險可用「放在子資料夾並在 App 內提示」緩解，且能自己刪除也意味著使用者真正擁有這些檔案——與 P4 的精神一致。
->
-> **未登入 iCloud 的降級路徑**（無論選哪個都要做）：不彈窗、不阻斷，在設定頁的備份區塊顯示「未啟用」狀態並引導至手動匯出。
+> 這仍遠低於 CloudKit 的成本，但不是零。S3 的排程要按「低—中」而非「低」估。
+
+**誤刪風險的緩解**：文件放在 container 的子資料夾，並在設定頁的備份區塊說明。使用者能自己刪除也意味著他真正擁有這些檔案——與 P4 的精神一致。
+
+**未登入 iCloud 的降級路徑**：不彈窗、不阻斷。在設定頁的備份區塊顯示「未啟用」，並引導至手動匯出。文件一律先寫本機，同步是額外的一層——**本機永遠是真相來源**（`prd.md §8`）。
 
 **已知限制**：Android 版推出後，兩平台之間無法自動同步。這是刻意的取捨，處理方式見 `prd.md §8`。
 
@@ -1218,15 +1397,17 @@ E1 完成時建立第一份基準線，記錄於 `docs/perf-baseline.md`（屆�
 
 ## 14. 風險與退路
 
+> **編號消歧義**：本節的 **R** 是「技術退路」編號（R1–R9），**與 Cloudflare R2（§11 的物件儲存）無關**——恰好撞名的是下表的 R2「Android Vulkan / R16Uint 支援」。另外 `roadmap/checkpoints.md` 的單人專案風險編號是 **RS**，又是第三套。引用時務必連上下文一起寫。
+
 | # | 風險 | 何時會顯現 | 退路 |
 |---|---|---|---|
 | R1 | **wgpu 的 present 路徑延遲不可接受** | E1 | 改為手寫 Metal / Vulkan。因 Boundary 3，影響範圍限於 `render` crate |
 | R2 | **Android 低階機的 Vulkan driver 或 R16Uint 支援問題** | Android 版（若不預先驗證） | ID map 降級為 RG8 打包；或拉高最低支援規格。**即使 v1 不做 Android，也必須在 E1 期間以一天的 spike 驗證**——它保護的是資產格式 |
-| R3 | **繪師 flats 品質不穩**（縫隙、抗鋸齒未關、對齊偏移） | M0 開始，隨圖庫規模放大 | baker 驗證嚴格化並納入 CI；與繪師建立回饋循環。寧可拒收，不可讓問題流到 runtime |
+| R3 | **繪師 flats 品質不穩**（縫隙、抗鋸齒未關、對齊偏移、色彩空間選錯） | **繪師首次交付（W4–6）開始**，隨圖庫規模放大 | baker 驗證嚴格化並納入 CI；與繪師建立回饋循環。寧可拒收，不可讓問題流到 runtime |
 | R4 | **每週 3–5 張的更新節奏無法維持** | 上線後 2–3 個月 | 這是商業風險而非技術風險，但技術上要確保 baker 全自動、資產上架零手動步驟 |
 | R5 | **FFI 介面在開發期需要修正** | E2 / E3 | 已預期。S0 的介面標記為 v0。因 uniffi 從 S0 導入，修正成本是「改 UDL 重新生成」而非手改 binding |
 | R6 | **GPU readback 造成 undo 提交頓挫** | E3 | ring buffer ＋ fence 非同步化；必要時改為 GPU-side texture array 複製，避免 readback 到 CPU。**進度計算共用同一套設施**（§4.7） |
-| R7 | **水彩做不出辨識度** | E2 / D5 | 「邊緣暈染」是 per-stroke 效果，但 `tip` 是 per-dab 貼圖——實作路徑尚未設計。退路：commit 時對 `T_wet` 取鄰域算梯度；若仍不可辨，**砍成四支筆刷**（PRD P2 已授權此決策） |
+| R7 | **水彩做不出辨識度** | E2 / D5 | 實作路徑已定案（commit 時對 `T_wet` 做 unsharp，§4.2 (d)），但辨識度未驗證。**三段退路，依序嘗試**：① blur 半徑隨 brush size 縮放 → ② 改兩趟 separable blur 加大擴散 → ③ **砍成四支筆刷**（PRD P2 已授權）。E2 內對此最多投入 3 天，超過即走 ③ |
 | R8 | **oplog 體積超出備份配額** | E3 | 量化 ＋ delta 編碼（§8.2）。若實測仍超標，降級策略是丟棄最舊已分享作品的 oplog，只保留 palette |
 | R9 | **單人專案的 bus factor** | 全程 | 決策脈絡全在一個人腦中。這三份文件就是唯一解方——**決策改變時必須即時寫回文件**。見 `roadmap/checkpoints.md` 單人專案的特有風險 |
 
