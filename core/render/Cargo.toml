@@ -1,0 +1,17 @@
+[package]
+name = "colorit-render"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[lib]
+name = "render"
+
+[lints]
+workspace = true
+
+[dependencies]
+colorit-colorpack = { workspace = true }
+colorit-stroke = { workspace = true }
+bytemuck = { workspace = true }
+wgpu = { workspace = true }

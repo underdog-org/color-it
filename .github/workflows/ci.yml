@@ -1,0 +1,64 @@
+name: CI
+
+# 觸發路徑：architecture.md §12.3 的三條，外加 xtask、workspace manifest 與本檔自身。
+# 少了後三者，改 deps-policy.toml 或 CI 設定本身不會被驗——實際會咬人的漏洞。
+# （GitHub Actions 不支援 YAML anchor，兩份清單只能各寫一次，改動時要同步。）
+on:
+  push:
+    branches: [main]
+    paths:
+      - "core/**"
+      - "tools/baker/**"
+      - "contracts/**"
+      - "xtask/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - ".github/workflows/ci.yml"
+  pull_request:
+    paths:
+      - "core/**"
+      - "tools/baker/**"
+      - "contracts/**"
+      - "xtask/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - ".github/workflows/ci.yml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+jobs:
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          lfs: false # assets/source 只有 baker job 需要（M1 才有）
+
+      # toolchain 版本的 SSOT 是 rust-toolchain.toml，此處不指定版本
+      - run: rustup toolchain install
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: fmt
+        run: cargo fmt --all --check
+
+      - name: clippy
+        run: cargo clippy --workspace --all-targets
+
+      # 鐵律 1／2 的守門：wgpu 只能出現在 render
+      - name: lint-deps
+        run: cargo xtask lint-deps
+
+      - name: test
+        run: cargo test --workspace
+
+      - name: build
+        run: cargo build --workspace

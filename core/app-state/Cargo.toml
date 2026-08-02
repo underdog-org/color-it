@@ -1,0 +1,13 @@
+[package]
+name = "colorit-app-state"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[lib]
+name = "app_state"
+
+[lints]
+workspace = true
+
+[dependencies]

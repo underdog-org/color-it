@@ -1,0 +1,45 @@
+# crate 依賴 policy —— 由 `cargo xtask lint-deps` 強制執行。
+#
+# 規則（完整說明見 docs/specs/build-infra.md §3）：
+#   1. 每個 workspace member 都必須在此有一節，否則失敗
+#   2. 內部依賴不在該節的 `internal` → 失敗
+#   3. `banned-external` 的項目不在該節的 `external` → 失敗
+#
+# key = package name 去掉 `colorit-` 前綴。只檢查直接宣告的依賴。
+#
+# ★ 改動這個檔案 = 改動架構。單向圖的出處是 architecture.md §5.1。
+
+[workspace]
+banned-external = ["wgpu"]
+
+# ── core ──────────────────────────────────────────────────────────
+# 依賴只能向下：colorpack 在最底，engine 在最上。
+
+[crates.colorpack]
+
+[crates.stroke]
+internal = ["colorpack"]
+
+[crates.oplog]
+internal = ["colorpack"]
+
+[crates.render]
+internal = ["colorpack", "stroke"]
+external = ["wgpu"] # ← 鐵律 1：唯一解禁 wgpu 的地方
+
+[crates.document]
+internal = ["colorpack", "oplog"]
+
+[crates.history]
+internal = ["colorpack", "oplog"]
+
+[crates.app-state]
+
+[crates.engine]
+internal = ["app-state", "document", "history", "render"]
+
+# ── 工具 ──────────────────────────────────────────────────────────
+
+[crates.baker]
+
+[crates.xtask]

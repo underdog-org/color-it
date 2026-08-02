@@ -1,0 +1,15 @@
+[package]
+name = "colorit-history"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[lib]
+name = "history"
+
+[lints]
+workspace = true
+
+[dependencies]
+colorit-colorpack = { workspace = true }
+colorit-oplog = { workspace = true }

@@ -1,0 +1,15 @@
+[package]
+name = "colorit-document"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[lib]
+name = "document"
+
+[lints]
+workspace = true
+
+[dependencies]
+colorit-colorpack = { workspace = true }
+colorit-oplog = { workspace = true }

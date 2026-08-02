@@ -1,0 +1,17 @@
+[package]
+name = "colorit-engine"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[lib]
+name = "engine"
+
+[lints]
+workspace = true
+
+[dependencies]
+colorit-app-state = { workspace = true }
+colorit-document = { workspace = true }
+colorit-history = { workspace = true }
+colorit-render = { workspace = true }

@@ -1,0 +1,5 @@
+[tools]
+git-lfs = "latest"
+kotlin = { version = "latest", asset_pattern = "kotlin-compiler-*.zip", bin_path = "kotlinc/bin" }
+# 只負責把 rustup 裝起來；版本 pin 的 SSOT 是 rust-toolchain.toml
+rust = "stable"

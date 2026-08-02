@@ -1,0 +1,10 @@
+/target
+
+# baker 產物：走 R2，不進 git（architecture.md §12.2）
+/assets/packs/
+
+# uniffi 產物：CI 每次重建，並由 `cargo xtask verify-generated` 檢查新鮮度
+/apps/ios/Generated/
+/apps/android/generated/
+
+.DS_Store
