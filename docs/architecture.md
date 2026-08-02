@@ -1,11 +1,11 @@
 # Color It — 架構設計文件
 
 > 狀態：草案 v0.2
-> 相關文件：[prd.md](./prd.md)｜[roadmap.md](./roadmap.md)
+> 相關文件：[prd.md](./prd.md)｜[roadmap/](./roadmap/README.md)
 
 > **v1 平台範圍：iOS only。**
 > 本文件中所有 Android 相關的規格（Compose、`SurfaceView`、`Choreographer`、Auto Backup、Vulkan / GLES）**全部保留為未來規格**，v1 不實作。
-> 保留而非刪除的理由：架構的跨平台性正是 Rust 核心的存在理由，刪掉等於把未來的成本藏起來。實際排程見 `roadmap.md §6`。
+> 保留而非刪除的理由：架構的跨平台性正是 Rust 核心的存在理由，刪掉等於把未來的成本藏起來。實際排程見 `roadmap/beyond-v1.md`。
 
 ---
 
@@ -166,7 +166,7 @@ color-it/
 ├─ docs/
 │  ├─ prd.md
 │  ├─ architecture.md
-│  ├─ roadmap.md
+│  ├─ roadmap/                     索引 ＋ 每個里程碑一份 ＋ checkpoints
 │  └─ contracts.md                 （待補：等 UDL 與 schema 成形後撰寫）
 │
 └─ xtask/                          建置協調
@@ -236,7 +236,7 @@ color-it/
 
 > **規則**：undo pool 設 64MB 上限，超過時丟棄最舊的 entry——**undo 深度是動態的**，複雜筆畫的可撤銷步數比簡單筆畫少。這比固定步數更符合記憶體現實。
 
-這份預算是 **E1 的驗收目標**（`roadmap.md` D4）。若真機量測超標，此時調整畫布解析度的代價最低——繪師尚未量產，且母帶是 4096 長邊，重新降採樣即可，不需要繪師返工。
+這份預算是 **E1 的驗收目標**（`roadmap/checkpoints.md` D4）。若真機量測超標，此時調整畫布解析度的代價最低——繪師尚未量產，且母帶是 4096 長邊，重新降採樣即可，不需要繪師返工。
 
 ### 4.1.2 `T_erase` — 為什麼需要它
 
@@ -834,7 +834,7 @@ pub struct QuantizedSample {
 
 配合 delta 編碼（座標存差值，多數情況下 ±127 以內）後可再降一個量級。**目標：重度作品壓縮後 < 200KB。**
 
-> 這個目標必須在 E3 以真實資料驗證，不能只在紙上算——見 `roadmap.md` E3 驗收。
+> 這個目標必須在 E3 以真實資料驗證，不能只在紙上算——見 `roadmap/E3.md` 驗收標準。
 
 #### 配額管理策略
 
@@ -1206,7 +1206,7 @@ E1 完成時建立第一份基準線，記錄於 `docs/perf-baseline.md`（屆�
 
 - 測試裝置清單（v1 至少涵蓋 iOS 高階與中階各一台；Android 三檔留待 Android 版）
 - 各指標的實測值
-- 依此回填本節與 `roadmap.md` 的驗收標準
+- 依此回填本節與 `roadmap/` 對應里程碑的驗收標準
 
 **手感相關的量測必須用手指進行**，用觸控筆會得到不具代表性的結果（`prd.md §2`）。
 
@@ -1228,7 +1228,7 @@ E1 完成時建立第一份基準線，記錄於 `docs/perf-baseline.md`（屆�
 | R6 | **GPU readback 造成 undo 提交頓挫** | E3 | ring buffer ＋ fence 非同步化；必要時改為 GPU-side texture array 複製，避免 readback 到 CPU。**進度計算共用同一套設施**（§4.7） |
 | R7 | **水彩做不出辨識度** | E2 / D5 | 「邊緣暈染」是 per-stroke 效果，但 `tip` 是 per-dab 貼圖——實作路徑尚未設計。退路：commit 時對 `T_wet` 取鄰域算梯度；若仍不可辨，**砍成四支筆刷**（PRD P2 已授權此決策） |
 | R8 | **oplog 體積超出備份配額** | E3 | 量化 ＋ delta 編碼（§8.2）。若實測仍超標，降級策略是丟棄最舊已分享作品的 oplog，只保留 palette |
-| R9 | **單人專案的 bus factor** | 全程 | 決策脈絡全在一個人腦中。這三份文件就是唯一解方——**決策改變時必須即時寫回文件**。見 `roadmap.md §5` |
+| R9 | **單人專案的 bus factor** | 全程 | 決策脈絡全在一個人腦中。這三份文件就是唯一解方——**決策改變時必須即時寫回文件**。見 `roadmap/checkpoints.md` 單人專案的特有風險 |
 
 ### R2 的提前驗證（即使 v1 不做 Android 也要做）
 
