@@ -47,6 +47,7 @@ enum Command {
 fn main() -> Result<()> {
     match Cli::parse().command {
         Command::LintDeps => lint_deps(),
+        Command::LintIos => lint_ios::run(&metadata::load()?.root),
         Command::GenTorture => gen_torture(),
         Command::Bake { dir, out, report } => bake(&dir, out, report),
         Command::Ios => ios::run(&metadata::load()?),
