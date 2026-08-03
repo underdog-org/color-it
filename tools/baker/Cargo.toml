@@ -4,8 +4,6 @@ version.workspace = true
 edition.workspace = true
 publish.workspace = true
 
-# bin ＋ lib：`bake()` 要被 xtask 當 library 呼叫（baker-core-design §1），
-# lib.name 用短名，照 build-infra.md §1 的慣例。
 [lib]
 name = "baker"
 path = "src/lib.rs"

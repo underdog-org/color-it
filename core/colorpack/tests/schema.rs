@@ -64,18 +64,31 @@ fn regions_sample_passes_schema() {
     assert!(errors.is_empty(), "regions 不符 schema：{errors:?}");
 }
 
-/// schema 的六個 category 與 Rust 的 enum 必須逐一對得上。
-#[test]
-fn category_enum_matches_schema() {
-    let doc = schema_document();
-    let from_schema: Vec<&str> = doc["$defs"]["manifest"]["properties"]["category"]["enum"]
+fn schema_enum(doc: &Value, property: &str) -> Vec<String> {
+    doc["$defs"]["manifest"]["properties"][property]["enum"]
         .as_array()
-        .unwrap()
+        .unwrap_or_else(|| panic!("{property} 在 schema 裡不是 enum"))
         .iter()
-        .map(|v| v.as_str().unwrap())
-        .collect();
-    let from_rust: Vec<&str> = Category::ALL.iter().map(|c| c.as_str()).collect();
-    assert_eq!(from_schema, from_rust);
+        .map(|v| v.as_str().unwrap().to_owned())
+        .collect()
+}
+
+/// 三個 enum 都要跨檢。
+#[test]
+fn all_manifest_enums_match_schema() {
+    let doc = schema_document();
+    assert_eq!(
+        schema_enum(&doc, "category"),
+        Category::ALL.map(|c| c.as_str().to_owned())
+    );
+    assert_eq!(
+        schema_enum(&doc, "aspect"),
+        Aspect::ALL.map(|a| a.as_str().to_owned())
+    );
+    assert_eq!(
+        schema_enum(&doc, "difficulty"),
+        Difficulty::ALL.map(|d| d.as_str().to_owned())
+    );
 }
 
 /// schema 收緊過（例如漏了一個必填欄位）時，這條會抓到「什麼都能通過」的假綠燈。

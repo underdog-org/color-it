@@ -1,0 +1,4 @@
+{
+  "content_hash": "sha256:2690b7c233662e8bcf7eb97729a748cc007f6b1a48603575ac7669431b10b7f3",
+  "note": "由 `cargo xtask gen-torture` 產生。改了 baker::synth 卻忘了重跑，tools/baker/tests/torture.rs 會失敗。hash 取自原始 RGBA，不是 PNG bytes。"
+}

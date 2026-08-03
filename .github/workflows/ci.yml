@@ -8,6 +8,9 @@ on:
       - "core/**"
       - "tools/baker/**"
       - "contracts/**"
+      # meta.json 不進 LFS，所以 lfs:false 的 checkout 仍驗得到它
+      # （tools/baker/tests/meta.rs）
+      - "assets/source/**"
       - "apps/ios/**"
       - "xtask/**"
       - "Cargo.toml"
@@ -19,6 +22,9 @@ on:
       - "core/**"
       - "tools/baker/**"
       - "contracts/**"
+      # meta.json 不進 LFS，所以 lfs:false 的 checkout 仍驗得到它
+      # （tools/baker/tests/meta.rs）
+      - "assets/source/**"
       - "apps/ios/**"
       - "xtask/**"
       - "Cargo.toml"
@@ -40,7 +46,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          lfs: false # assets/source 只有 baker job 需要（M1 才有）
+          # 端到端測試跑的是 baker::synth 生成的素材，不需要 LFS
+          # （baker-core-design §6）。真實素材的烘焙留給本地的 cargo xtask bake。
+          lfs: false
 
       # toolchain 版本的 SSOT 是 rust-toolchain.toml，此處不指定版本
       - run: rustup toolchain install

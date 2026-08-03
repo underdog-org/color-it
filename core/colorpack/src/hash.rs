@@ -38,6 +38,22 @@ mod tests {
         );
     }
 
+    /// **凍結向量。改到這個值就是改了 `.colorpack` 的 major 契約。**
+    ///
+    /// §3.3 的整段立論是 hash 永不漂移，但沒有這條的話，把長度前綴改成 BE、
+    /// 或調換串流順序，測試仍會全綠——而 `architecture §8.4` 說文件永遠指向它原本的
+    /// `asset_hash`，所以漂移一次就是全世界的使用者作品同時失效。
+    #[test]
+    fn golden_vector_is_frozen() {
+        assert_eq!(
+            content_hash(&[
+                ("regions.bin", b"\x01\x02\x03".as_slice()),
+                ("lineart.png", b"\x89PNG".as_slice()),
+            ]),
+            "sha256:c68347503153ae31bec089081b121339b30de4d0456c8c87403bd20593919826"
+        );
+    }
+
     /// 長度前綴的存在理由：不加長度的話，`("ab", "")` 與 `("a", "b")` 會同 hash。
     #[test]
     fn length_prefixes_prevent_boundary_collisions() {

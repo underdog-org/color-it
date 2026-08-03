@@ -11,11 +11,6 @@ use anyhow::{Context, Result};
 
 use crate::image::{PngOptions, display_p3_profile, encode_rgba};
 
-/// index 0 是分隔框，1..=15 給區塊內容用。高飽和、彼此差異大（`assets-spec §4.2 ②`）。
-///
-/// **不含 `#FF00FF`**：它是 `assets-spec §6.1` 縫隙檢查的保留色，baker 會以
-/// `reserved-color` 拒收。原 `PALETTE[5]` 是洋紅，改為淡青 `[128,255,255]`——
-/// 與其餘 15 色的最小歐氏距離 128，且與洋紅在視覺上完全分得開。
 pub const PALETTE: [[u8; 3]; 16] = [
     [64, 64, 64],
     [255, 0, 0],
@@ -35,9 +30,6 @@ pub const PALETTE: [[u8; 3]; 16] = [
     [160, 160, 0],
 ];
 
-/// `reference[p] = PALETTE[PERM[flats_idx[p]]]`。`i*7+3 mod 16` 是 0..15 的雙射且無不動點：
-/// 雙射保證每區仍是單一純色（§2.4 唯一的那條檢查），無不動點保證檔案位元 ≠ `flats.png`
-/// ——能抓到「baker 偷懶直接比檔案而非比區域」的錯誤實作。
 pub const PERM: [u8; 16] = {
     let mut p = [0u8; 16];
     let mut i = 0;
@@ -196,8 +188,6 @@ const ROWS: u32 = T_H / ZONE;
 ///
 /// **8px 不是隨便選的**：`build_lineart` 在每條邊界兩側各畫 1px 線，降採樣後
 /// `line_mask` 會從邊界往內吃掉 2 個輸出像素，而 `dilate` 再把它們判給鄰區。
-/// 4px 的框在輸出只有 2px，兩側各被吃 2px 之後整條消失，直接撞上
-/// `region-count-drift`。8px（輸出 4px，中間 2px 不在 `line_mask` 內）才活得下來。
 const FRAME_W: u32 = 8;
 
 /// 區塊內用色：永遠落在 1..=15，不會撞到分隔框。
@@ -239,8 +229,6 @@ fn zone_grid(g: &mut Canvas, r: (u32, u32, u32, u32), base: u32, cell: u32) {
     }
 }
 
-/// 等寬長條。相鄰必不同色，同一個顏色在不相鄰處反覆出現——正是
-/// `assets-spec §4.2 ④` 允許的重用。
 fn zone_stripes(g: &mut Canvas, r: (u32, u32, u32, u32), base: u32, thick: u32, vertical: bool) {
     let (x0, y0, w, h) = r;
     let span = if vertical { w } else { h };
@@ -294,26 +282,30 @@ fn zone_pie(g: &mut Canvas, r: (u32, u32, u32, u32), base: u32) {
     }
 }
 
-/// 阿基米德螺旋：通道是一條極長的細區域，對 tile 化的渲染與 flood fill 都是最壞情況。
-/// 圈距 32、壁厚 8；中心 64px 另給一色，避開螺旋在原點的退化。
-fn zone_spiral(g: &mut Canvas, r: (u32, u32, u32, u32), base: u32) {
+/// 梳齒狀迴廊：只有兩個區域，但通道是一條長達數萬像素的細長蛇行路徑——
+/// 對 tile 化的渲染、flood fill 與 RLE 都是最壞情況。
+///
+/// **本來是阿基米德螺旋，改成軸對齊的梳齒。** 螺旋的曲線邊界（以及為了收邊而加的
+/// 內外圓）與 2×2 majority 的方格網互相走樣：每一圈與圓相切之處都會被切出幾十個
+fn zone_serpentine(g: &mut Canvas, r: (u32, u32, u32, u32), base: u32) {
+    const SPINE: u32 = 8;
+    const TOOTH: u32 = 8;
+    const PITCH: u32 = 32;
+    const RETURN: u32 = 24;
+
     let (x0, y0, w, h) = r;
-    let (wall, chan, core) = (c(base, 0), c(base, 1), c(base, 2));
-    let (cx, cy) = (w as f64 / 2.0, h as f64 / 2.0);
-    let a = 32.0 / std::f64::consts::TAU;
-    for y in 0..h {
-        for x in 0..w {
-            let (dx, dy) = (x as f64 - cx, y as f64 - cy);
-            let radius = dx.hypot(dy);
-            if radius < 64.0 {
-                g.set(x0 + x, y0 + y, core);
-                continue;
-            }
-            let theta = dy.atan2(dx) + std::f64::consts::PI;
-            let k = (radius / a - theta) / std::f64::consts::TAU;
-            let dist = (k - k.round()).abs() * a * std::f64::consts::TAU;
-            g.set(x0 + x, y0 + y, if dist < 4.0 { wall } else { chan });
-        }
+    let (wall, chan) = (c(base, 0), c(base, 1));
+    g.rect(x0, y0, w, h, chan);
+    g.rect(x0, y0, SPINE, h, wall);
+    let teeth = (h - TOOTH) / PITCH;
+    for i in 0..teeth {
+        g.rect(
+            x0 + SPINE,
+            y0 + TOOTH + i * PITCH,
+            w - SPINE - RETURN,
+            TOOTH,
+            wall,
+        );
     }
 }
 
@@ -396,7 +388,7 @@ fn torture_canvas() -> Canvas {
                 (2, 1) => zone_stripes(&mut g, r, base, 8, false),
                 (0, 2) => zone_rings(&mut g, r, base),
                 (1, 2) => zone_pie(&mut g, r, base),
-                (2, 2) => zone_spiral(&mut g, r, base),
+                (2, 2) => zone_serpentine(&mut g, r, base),
                 (0, 3) => zone_edges(&mut g, r, base),
                 (1, 3) => zone_reuse(&mut g, r, base, 128),
                 _ => zone_fragments(&mut g, r, base),
@@ -415,7 +407,7 @@ fn torture_canvas() -> Canvas {
 }
 
 pub const TORTURE_NOTES: &str = "由 `cargo xtask gen-torture` 決定性產生，不是繪師交付。\
-12 個壓力區塊（密集格線、細長條、同心環、放射楔形、螺旋、對角同色重用、極端長寬比碎片、貼畫布邊特徵），\
+12 個壓力區塊（密集格線、細長條、同心環、放射楔形、梳齒迴廊、對角同色重用、極端長寬比碎片、貼畫布邊特徵），\
 所有特徵最短邊 ≥8px 且對齊偶數邊界，降採樣＋膨脹後仍存活。3:4 且無 shade，跑 has_shade = false 那條路徑。\
 category 取 mandala 只因幾何圖形最接近，不代表難度分級。";
 
@@ -438,16 +430,45 @@ pub fn torture_01() -> Asset {
     }
 }
 
+/// 生成器與 committed 產物之間的守門檔。放在 `assets/source/**/*.json`，
+/// 依 `.gitattributes` 不進 LFS，所以 CI 以 `lfs: false` checkout 也讀得到。
+pub const LOCK_FILE: &str = "synth-lock.json";
+
+/// 三張圖的**原始 RGBA** 的正規化 hash。
+///
+/// 刻意不 hash PNG bytes：那會綁到 `png` crate 的 deflate 實作，換一次依賴版本
+/// 就誤報。要守的是「改了生成器卻忘了重跑 `gen-torture`」，那是內容層的事。
+pub fn torture_content_hash() -> String {
+    let asset = torture_01();
+    colorpack::hash::content_hash(&[
+        (crate::source::FLATS, asset.flats.as_slice()),
+        (crate::source::LINEART, asset.lineart.as_slice()),
+        (crate::source::REFERENCE, asset.reference.as_slice()),
+    ])
+}
+
 /// `cargo xtask gen-torture` 的實作。
 pub fn write_torture(repo_root: &Path) -> Result<PathBuf> {
-    torture_01().write(&repo_root.join("assets/source"))
+    let asset = torture_01();
+    let dir = asset.write(&repo_root.join("assets/source"))?;
+    let lock = serde_json::json!({
+        "note": format!(
+            "由 `cargo xtask gen-torture` 產生。改了 baker::synth 卻忘了重跑，\
+             tools/baker/tests/torture.rs 會失敗。hash 取自原始 RGBA，不是 PNG bytes。"
+        ),
+        "content_hash": torture_content_hash(),
+    });
+    std::fs::write(
+        dir.join(LOCK_FILE),
+        format!("{}\n", serde_json::to_string_pretty(&lock)?),
+    )
+    .context("寫入 synth-lock.json 失敗")?;
+    Ok(dir)
 }
 
 // ── 合格的小型素材（端到端測試用）───────────────────────────────────
 
 /// 一張合規的合成素材：粗網格 ＋ 邊界線稿 ＋ PERM 配色。
-///
-/// CI 的端到端跑的是它而不是 LFS 素材（§6）。
 pub fn valid(id: &str, width: u32, height: u32, cell: u32, has_shade: bool) -> Asset {
     let mut canvas = Canvas::new(width, height);
     zone_grid(&mut canvas, (0, 0, width, height), 0, cell);
@@ -557,8 +578,6 @@ pub fn negative(kind: Negative) -> Fixture {
             (crate::report::code::COLOR_SPACE, Vec::new())
         }
         Negative::Antialiased => {
-            // 300 個各佔 1px 的混色，模擬沒關抗鋸齒的邊界。唯一色數仍遠低於 1024，
-            // 所以撞到的是**實判**而不是快篩——這正是 §2.6 要證明的事。
             let mut planted = Vec::new();
             for i in 0..300u32 {
                 let (x, y) = (1000 + i, 2000);
@@ -568,8 +587,6 @@ pub fn negative(kind: Negative) -> Fixture {
             (crate::report::code::TINY_COLOR_AREA, planted)
         }
         Negative::Vanishing1px => {
-            // 300 個孤立單像素，全部同一個顏色（總面積 300 ≥ 100，過得了母帶實判），
-            // 每個都落在 2×2 區塊裡的單一位置 → majority 是 1:3，必敗。
             let mut planted = Vec::new();
             for i in 0..300u32 {
                 let (x, y) = (513 + 8 * i, 1001);

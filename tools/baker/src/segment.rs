@@ -2,9 +2,7 @@
 
 use std::collections::HashMap;
 
-/// 快篩門檻（§2.6）。命中代表圖徹底壞掉（例如色彩空間被轉換過）。
 pub const MAX_UNIQUE_COLORS: usize = 1024;
-/// 實判門檻（§2.6、`assets-spec §4.2`），**母帶**解析度。
 pub const MIN_COLOR_AREA: u32 = 100;
 
 /// `#FF00FF` 是 `assets-spec §6.1` 縫隙檢查的保留色。
@@ -62,11 +60,6 @@ impl RegionMap {
     }
 }
 
-/// **4-連通**（§2.1）。8-連通會把只在對角相觸的兩塊同色區域併成一塊，而
-/// `assets-spec §4.2 ④` 給繪師的心智模型是「相連才會合併」——對角相觸算不算相連
-/// 在繪師端是模稜兩可的，取保守的 4-連通。
-///
-/// id 依「第一個像素的 raster order」配發，完全決定性。
 pub fn label_regions(rgba: &[u8], width: u32, height: u32) -> RegionMap {
     let (w, h) = (width as usize, height as usize);
     let mut labels = vec![u32::MAX; w * h];

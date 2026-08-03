@@ -9,11 +9,6 @@ use crate::segment::{RegionMap, count_components_per_id};
 pub const MIN_REGION_AREA: u32 = 200;
 
 /// `region-count-range` 的門檻。兩者都是警告，不是錯誤。
-///
-/// 下界 8：少於 8 塊的著色頁沒有「受區域約束的塗抹」可言，多半是 `flats` 只畫了大色塊。
-/// 上界 2000：`assets-spec §8` 的「專注」門檻是 200（30 分鐘以上），取 10 倍作為體感上限——
-/// 再多，使用者不可能逐區填完，`regions.json` 也進入 MB 級。程式生成的曼陀羅與壓力素材
-/// （`torture-01`）本來就會超過上界，所以它是警告而非錯誤。
 pub const REGION_COUNT_MIN: u32 = 8;
 pub const REGION_COUNT_MAX: u32 = 2000;
 
@@ -75,9 +70,6 @@ pub fn check(
 ) -> Vec<Diagnostic> {
     let mut out = Vec::new();
 
-    // §2.3 的「未指派像素」在輸出階段**恆真**：majority 必定為每個輸出像素產出一個
-    // 既有 ID，沒有第三種可能。清冊把它標成「Master ＋ Output」是照 architecture §9.3
-    // 的字面，實作上這裡只留一條 debug assertion。
     debug_assert!(
         ids.iter().all(|&id| id < master.count),
         "majority 產出了不存在的 region ID——輸出階段不可能有未指派像素"

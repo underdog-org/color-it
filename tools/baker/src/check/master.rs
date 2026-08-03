@@ -4,7 +4,7 @@ use colorpack::Aspect;
 
 use crate::compose::luma;
 use crate::image::Image;
-use crate::report::{Coords, Diagnostic, Stage, code};
+use crate::report::{Coords, Diagnostic, Stage, UniqueColors, code};
 use crate::segment::{self, MIN_COLOR_AREA, RESERVED_COLOR};
 
 /// 母帶長邊。
@@ -63,7 +63,7 @@ pub fn color_space(images: &[(&str, &Image)]) -> Vec<Diagnostic> {
 }
 
 /// `flats` 的四條：未指派像素、抗鋸齒快篩、抗鋸齒實判、保留色。
-pub fn flats(flats: &Image) -> (Vec<Diagnostic>, usize) {
+pub fn flats(flats: &Image) -> (Vec<Diagnostic>, UniqueColors) {
     let mut out = Vec::new();
     let width = flats.width;
 
@@ -102,7 +102,11 @@ pub fn flats(flats: &Image) -> (Vec<Diagnostic>, usize) {
                     segment::MAX_UNIQUE_COLORS
                 ),
             ));
-            seen
+            // 掃到就停，所以這是下界不是實際值。
+            UniqueColors {
+                count: seen,
+                exact: false,
+            }
         }
         Ok(hist) => {
             // 實判：這才是 assets-spec §4.2 / §7 對繪師承諾的那條。
@@ -155,7 +159,10 @@ pub fn flats(flats: &Image) -> (Vec<Diagnostic>, usize) {
                     .with_coords(coords),
                 );
             }
-            hist.len()
+            UniqueColors {
+                count: hist.len(),
+                exact: true,
+            }
         }
     };
 

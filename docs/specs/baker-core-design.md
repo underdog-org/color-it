@@ -1,9 +1,11 @@
 # Baker 核心設計
 
 > M1 資產管線的實作規格。範圍：`tools/baker` ＋ `core/colorpack`。
-> 狀態：v1.1（2026-08-03）——v1.1 修正膨脹的迭代語意、把抗鋸齒判準改回 `assets-spec` 的面積承諾（唯一色數改為快篩）、
-> 補上 §4 的檢查清冊與 §1 的完整依賴，刪去 §2.4 那條會誤退合格素材的鄰接檢查、定死 4-連通，
-> 並刪去已完成的 `category` 修正。
+> 狀態：v1.2（2026-08-03）——v1.2 是**實作落地後的回寫**：§0 的文件修正清單已全數完成，
+> §1／§3.2／§4.1／§4.2／§5 依實作對齊（deps 補齊、zip 權限措辭改為「釘死」、清冊補 `source-incomplete`、
+> `unassigned-pixel` 降回純 Master、`Diagnostic` 補 `coord_total`、fixture 生成器路徑與 torture-01 實測值）。
+> v1.1 修正膨脹的迭代語意、把抗鋸齒判準改回 `assets-spec` 的面積承諾（唯一色數改為快篩）、
+> 補上 §4 的檢查清冊與 §1 的完整依賴，刪去 §2.4 那條會誤退合格素材的鄰接檢查、定死 4-連通。
 > 相關：[roadmap/M1](../roadmap/M1.md)｜[architecture §9](../architecture.md)｜[assets-spec](../assets-spec.md)
 
 ---
@@ -16,7 +18,7 @@
 
 > **決議**：母帶不動（既有兩張直式素材已是 3072×4096），runtime 改為 **1536×2048**，比例名稱改為 **3:4**。兩種比例都是乾淨的 ÷2。像素數 3.15M，仍低於 1:1 的 4.19M，`§4.1.1`「以 1:1 為記憶體上界」的論證不變。
 
-**文件修正清單**（M1 驗收「決策已寫回文件」）：
+**文件修正清單**（M1 驗收「決策已寫回文件」）——**全數完成於 v1.2**：
 
 | 檔案 | 修正 |
 |---|---|
@@ -34,8 +36,9 @@
 `core/colorpack` 是 baker 與 runtime 的唯一共用面（`architecture §6` Boundary 4）。它只懂容器格式，**不依賴 `png`**——PNG bytes 對它是不透明 blob。
 
 ```
-core/colorpack/            deps: serde, serde_json, zip, sha2
+core/colorpack/            deps: serde, serde_json, zip, sha2, flate2
                            dev-deps: jsonschema（§3.8）、proptest（§6）
+                           flate2 不被直接使用，只為 zip 選定 deflate backend
   lib.rs        ColorPack::write_to() / ColorPack::open()
   manifest.rs   Manifest serde ＋ schema_version major 檢查
   region.rs     RegionEntry
@@ -43,7 +46,8 @@ core/colorpack/            deps: serde, serde_json, zip, sha2
   container.rs  zip 讀寫：副檔名→壓縮方式、決定性 metadata
   hash.rs       content_hash 的正規化定義
 
-tools/baker/               deps: colorlull-colorpack, png, clap, anyhow, serde_json
+tools/baker/               deps: colorlull-colorpack, png, jpeg-encoder（§3.7）,
+                                 clap, anyhow, serde, serde_json
                            dev-dep: tempfile（§5.2）
   main.rs       clap 薄殼
   lib.rs        bake(dir, opts) -> Report        管線編排，一條直線
@@ -57,7 +61,7 @@ tools/baker/               deps: colorlull-colorpack, png, clap, anyhow, serde_j
   thumb.rs      縮圖合成
   check/master.rs, check/output.rs
   report.rs     Diagnostic → 文字 / JSON
-  synth.rs      合成素材產生器（zone 原語）
+  synth.rs      合成素材產生器（zone 原語）＋ torture-01 ＋ negative fixture
 ```
 
 **`synth.rs` 放在 baker 而非 xtask**：torture-01 與 negative fixture 是同一件事的正反面，共用同一組 zone 原語。`xtask` 改為依賴 `colorlull-baker` lib，`gen-torture` 與 `bake` 都直接呼叫，不 shell out（錯誤訊息才帶得回來）。
@@ -190,7 +194,9 @@ entry 順序固定；`shade.png` 在 `has_shade = false` 時整個不存在。
 
 ### 3.2 決定性
 
-mtime 全部固定為 zip epoch（1980-01-01 00:00:00）、不寫 unix 權限／extra field／comment、deflate level 固定。同輸入重跑 → 位元相同。
+mtime 全部固定為 zip epoch（1980-01-01 00:00:00）、不寫 extra field／comment、deflate level 固定為 6。同輸入重跑 → 位元相同。
+
+**unix 權限與 host system 是「釘死」而不是「不寫」。** zip 格式的 central directory 一定有 `external_attributes`，而 zip crate 的 `normalize()` 會把 `None` 補成它自己的預設值——沒有「不寫」這個選項。所以顯式指定 **`0o644`** 與 **`System::Unix`**：前者不吃 crate 預設（換版本時預設值變了也不會改到輸出位元），後者消掉 zip crate 依 `cfg!(windows)` 在 Dos／Unix 之間分歧的行為，否則「同輸入重跑 → 位元相同」只在同一個 OS 家族內成立。有測試釘住 `external_attributes`。
 
 ### 3.3 `content_hash`
 
@@ -206,6 +212,10 @@ for entry in ENTRY_ORDER:
 以 `"sha256:" + lowercase hex` 寫入 `manifest.content_hash`。
 
 兩個理由：manifest 在 zip 內又要含 hash 會循環；更重要的是 `architecture §8.4` 規定「文件永遠指向它原本的 `asset_hash`，不自動升級」——**hash 必須不受 zip crate 版本與 deflate 實作影響**，否則升級一個依賴就會讓全世界的使用者作品失效。
+
+因為同一個理由，**必須有凍結向量**：只驗「改內容會換 hash」這種相對性質的話，把長度前綴改成 BE、調換 `ENTRY_ORDER`、或改 `RegionEntry` 的欄位順序，測試都會全綠。凍結兩層——`hash::content_hash` 的最小輸入一組，完整 sample pack 一組。**改到那兩個字面值就是改了 major 契約。**
+
+`ColorPack::open()` **重算 hash 並比對**。既然 hash 取的是未壓縮內容，讀端重算幾乎不用額外成本；而 runtime 拿 `asset_hash` 對應使用者作品，內容與 hash 對不上時繼續讀，等於把錯的東西當成對的存進去。同理 `open()` 也驗 `region_ids` 全部 `< region_count`——超界 ID 會變成 Mode A 永遠點不到的幽靈區。
 
 ### 3.4 `manifest.json`
 
@@ -265,13 +275,14 @@ Gallery 對鎖定的線稿也顯示縮圖（`prd §5.1`），且 `architecture �
 
 | 檢查項 | `code` | 階段 | severity | 來源 |
 |---|---|---|---|---|
+| 來源目錄缺檔（三張必交 PNG 或 `meta.json`） | `source-incomplete` | Master | Error | 本設計 §2 |
 | 四張圖尺寸與對齊一致 | `size-mismatch` | Master | Error | `assets-spec §7`、`arch §9.3` |
 | 長邊 4096、比例 1:1 或 3:4 | `canvas-size` | Master | Error | `assets-spec §7`、`arch §9.3` |
 | 色彩描述檔為 sRGB | `color-space` | Master | Error | `assets-spec §7`、`arch §9.3` |
 | `flats` 唯一色數 > 1024 | `unique-color-overflow` | Master | Error | 本設計 §2.6（快篩） |
 | `flats` 任一顏色總面積 < 100px（**母帶**解析度） | `tiny-color-area` | Master | Error | `assets-spec §7`「`flats` 無抗鋸齒」、`arch §9.3` |
 | `flats` 使用保留色 `#FF00FF` | `reserved-color` | Master | Error | `assets-spec §7` |
-| 未指派像素（`flats` alpha < 255，§2.3） | `unassigned-pixel` | Master ＋ Output | Error | `assets-spec §7`、`arch §9.3` |
+| 未指派像素（`flats` alpha < 255，§2.3） | `unassigned-pixel` | Master | Error | `assets-spec §7`、`arch §9.3` |
 | `reference` 每區顏色唯一（§2.4） | `ref-mismatch` | Master | Error | `assets-spec §7` 的兩列（「每區顏色唯一」＋「不含 `flats` 沒有的邊界」，後者是前者的推論）、`arch §9.3` |
 | `shade` 有 luma < 60 的像素 | `shade-too-dark` | Master | Error | `assets-spec §7` |
 | `meta.json` 的 `id` 與資料夾名不一致 | `meta-id-mismatch` | Master | Error | `assets-spec §7`、`arch §9.3` |
@@ -284,6 +295,8 @@ Gallery 對鎖定的線稿也顯示縮圖（`prd §5.1`），且 `architecture �
 
 面積門檻分屬不同解析度，是最容易混用的地方：`tiny-color-area` 的 100px 在**母帶**，`tiny-region` 的 200px 在**輸出**（繪師端對應的母帶數字是 800px，見 `assets-spec §7` 註）。
 
+**`unassigned-pixel` 只在 Master。** `arch §9.3` 原本標「母帶 ＋ 輸出」，但輸出階段它**恆真**——majority 必定為每個輸出像素產出一個既有 ID，沒有第三種可能。與其留一條永遠不會觸發的檢查，不如降成 Master 專屬，實作端只保留一條 `debug_assert`。
+
 ### 4.2 報告
 
 ```rust
@@ -292,13 +305,16 @@ struct Diagnostic {
     code: &'static str,      // "unassigned-pixel" / "ref-mismatch" / ...
     stage: Stage,            // Master | Output
     message: String,
-    coords: Vec<(u32, u32)>, // 上限 16，超過只報總數
+    coords: Vec<(u32, u32)>, // 上限 16
+    coord_total: usize,      // 超過上限時的實際總數
     region: Option<u32>,
 }
 ```
 
 - **階段內不 fail-fast**：跑完該階段全部檢查才決定。繪師一次拿到所有問題，來回從 N 天變 1 天。
+  **唯二的例外是算不下去的兩條**——`size-mismatch`（逐像素會越界）與 `unique-color-overflow`（connected components 會切出幾百萬區）。除此之外一律往下跑：`canvas-size` 命中時像素檢查仍然成立，`reserved-color` / `tiny-color-area` 命中時 `label_regions` 仍然成立。把它們綁進同一個提早退出，就會讓繪師改完尺寸重交才第一次看到縫隙問題。
 - **階段間 fail-fast**：母帶有 Error 就不進降採樣，後面的結果沒有意義。
+- **`flats` 的唯一色數一律列出**，掛在 `Report` 而非 `Summary`——「之後要調 `MAX_UNIQUE_COLORS` 才有依據」講的正是被退件的那些素材，只在成功路徑輸出等於沒有。快篩命中時掃描提前中止，該值是**下界**，渲染成 `≥N` 而不是假裝是實際值。
 - **座標一律換算回母帶座標系**（繪師在 CSP 裡看到的那個）。輸出階段發現的問題 ×2 換算並標註「於輸出解析度發現」。這是 `assets-spec §7`「退件附失敗座標」這個承諾能否兌現的關鍵。
 - coords 上限 16，超過印「另有 N 處」。一張全錯的圖不該吐四百萬行。
 - exit code：`0` 通過（可含警告）／ `1` 有 Error ／ `2` baker 自身故障。
@@ -314,18 +330,26 @@ struct Diagnostic {
 
 | 產物 | 定位 |
 |---|---|
-| `assets/source/torture-01/` | **合格**壓力素材。所有特徵 ≥4px 且對齊偶數邊界（降採樣後仍 ≥2px）。區域數上萬，`has_shade = false`，3:4 |
-| `tools/baker/tests/fixtures/`（生成器程式碼） | 5 組預期拒收：`gap`（未指派像素）、`ref-mismatch`（在某一塊裡塗第二個顏色——不是相鄰區同色，那是合法的）、`display-p3`、`antialiased`、`vanishing-1px`（現行的 1px 特徵搬來） |
+| `assets/source/torture-01/` | **合格**壓力素材。所有特徵最短邊 **≥8px**，軸對齊的特徵落在偶數邊界（降採樣後仍 ≥4px）。實測 **4236 區**，`has_shade = false`，3:4 |
+| `baker::synth::negative()`（生成器程式碼） | 5 組預期拒收：`gap`（未指派像素）、`ref-mismatch`（在某一塊裡塗第二個顏色——不是相鄰區同色，那是合法的）、`display-p3`、`antialiased`、`vanishing-1px`（原本的 1px 特徵搬來） |
+
+**「對齊偶數邊界」只約束軸對齊的特徵。** `zone_pie` 是 `atan2` 放射楔形，邊界本來就不是水平／垂直線，21 個區域的 bbox 落在奇數座標——但那些區域最窄處 ≈25px，降採樣後遠 >2px。要求放射楔形量化到偶數格會扭曲它想測的東西（非軸對齊邊界在 majority 下的行為），得不償失。
+
+**區域數是 4236，不是「上萬」。** 這是 `zone_grid` cell=32 在 4 個 zone 上的實際結果。4236 已經遠超 `REGION_COUNT_MAX`（2000）、落在 `focused` 難度，壓力測試的目的達到了；為了湊一個整數而把 cell 再切細，只是讓測試更慢。**`torture-01` 有一條 e2e 測試直接烘它**（用生成器現場產生，不讀 LFS 檔），斷言它**通過**且唯一的診斷是 `region-count-range` 警告——出現 `tiny-region` 或 `region-split` 就代表 ≥8px／偶數對齊的設計沒守住。
 
 **生成器重寫時 `PALETTE` 必須移除 `#FF00FF`。** `xtask/src/torture.rs` 的 `PALETTE[5] = [255, 0, 255]`，而 `c()` 回傳 1..=15——洋紅確實出現在現行的 `flats.png`。那是 `assets-spec §6.1` 縫隙檢查的保留色（清冊裡的 `reserved-color`），所以即使把所有特徵重做成 ≥4px，`torture-01` 仍會被 baker 自己拒收。改用另一個高飽和、且與其餘 15 色差異夠大的顏色。
 
 `torture-01` 補產 `reference.png`：`reference[p] = PERM[flats[p]]`，`PERM` 是 0..15 的固定雙射。雙射保證每區仍是單一純色（§2.4 唯一的那條檢查），但檔案位元 ≠ `flats.png`，能抓到「baker 偷懶直接比檔案而非比區域」的錯誤實作。
 
+**生成器與 committed 產物之間有 drift 守門。** `gen-torture` 順帶寫出 `assets/source/torture-01/synth-lock.json`，內含三張圖**原始 RGBA** 的正規化 hash；一條測試重新生成並比對。刻意不 hash PNG bytes——那會綁到 `png` crate 的 deflate 實作，換一次依賴版本就誤報；要守的是「改了 `synth.rs` 卻忘了重跑 `gen-torture`」。lock 檔落在 `assets/source/**/*.json`，依 `.gitattributes` 不進 LFS，所以 CI 的 `lfs: false` checkout 也讀得到。
+
 ### 5.2 negative fixture 不進 git
 
 fixture 必須是完整 4096 級尺寸（否則會先撞到「長邊 4096」檢查，測不到想測的那條）。5 組 × 4 張進 git 是幾百 MB。
 
-**`tools/baker/tests/fixtures/` 放的是生成器程式碼，不是 PNG。** 每條測試自己生一組到 tempdir，跑完即丟。repo 零增重，fixture 隨規格演進不會膠死。
+**放進 repo 的是生成器程式碼，不是 PNG。** 每條測試自己生一組到 tempdir，跑完即丟。repo 零增重，fixture 隨規格演進不會膠死。
+
+生成器住在 **`tools/baker/src/synth.rs`**（不是 `tests/fixtures/`）——negative fixture 與 `torture-01` 共用同一組 zone 原語，而 `torture-01` 要被 `xtask gen-torture` 當 library 呼叫，只有在 `src/` 才做得到。`tests/` 底下的東西 xtask 看不見。
 
 ### 5.3 現有素材的修正
 
@@ -339,13 +363,18 @@ fixture 必須是完整 4096 級尺寸（否則會先撞到「長邊 4096」檢�
 
 | 層 | 內容 |
 |---|---|
-| 單元 | rle round-trip（proptest）、majority 平手規則、dilate、色彩空間判定（含泛用名稱 iCCP） |
+| 單元 | rle round-trip（proptest）、majority 平手規則、dilate、色彩空間判定（含泛用名稱 iCCP）、`content_hash` 凍結向量（§3.3）、zip 的 mtime／權限／entry 順序 |
 | 拒收 | 5 個 negative fixture 各一條測試。斷言 **特定 `code` 出現 ＋ 座標落在生成器刻意植入的位置**——只斷言「失敗」會讓任何理由的失敗都變綠燈 |
-| 端到端 | 三張素材 → pack → 用 colorpack reader 開回來 → 斷言 `region_count` / `difficulty` / `has_shade`，並**連跑兩次比對位元相同** |
+| 端到端 | 素材 → pack → 用 colorpack reader 開回來 → 斷言 `region_count` / `difficulty` / `has_shade`，並**連跑兩次比對位元相同**。另有一條專跑 `torture-01`（§5.1） |
+| 階段 | 一張同時踩到四條互相獨立檢查的素材，斷言報告**四條全含**——這是 §4.2「階段內不 fail-fast」唯一守得住的方式 |
+
+**`display-p3` 是唯一沒有座標斷言的拒收測試**：問題在 PNG chunk 不在像素，沒有座標可報。改斷言「訊息指名是哪一張圖」＋「只有 `flats` 命中，其餘三張不被連坐」。
+
+**端到端跑的是 `synth` 生成的素材，不是 LFS 的三張手繪。** CI 以 `lfs: false` checkout（`build-infra.md §5`），真實素材在 CI 裡只拿得到 pointer；而且把 golden 值綁在手繪素材上，素材一改就要改測試。真實素材的烘焙留給本地的 `cargo xtask bake`。連帶結果：`assets/source/**` 觸發 CI 時，實際驗得到的只有 `meta.json` 與 `synth-lock.json`。
 
 **`core/colorpack` 的 reader 在 M1 就做**，不留到 E1：round-trip 是驗證 writer 正確最便宜的手段，而 reader 本身只是 zip central directory 解析加 RLE 解碼。
 
-CI：`tools/baker/**` 或 `assets/source/**` 變動 → 跑全部三層。
+CI：`tools/baker/**` 或 `assets/source/**` 變動 → 跑全部四層。
 
 ---
 

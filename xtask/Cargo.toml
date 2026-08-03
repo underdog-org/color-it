@@ -13,6 +13,8 @@ workspace = true
 
 [dependencies]
 anyhow = { workspace = true }
+# baker 當 library 連進來，不 shell out——錯誤訊息才帶得回來（baker-core-design §1）
+colorlull-baker = { workspace = true }
 camino = { workspace = true }
 clap = { workspace = true }
 png = { workspace = true }

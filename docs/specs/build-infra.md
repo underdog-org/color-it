@@ -9,7 +9,7 @@
 Cargo.toml              [workspace] members ＋ [workspace.dependencies] 集中版本
 rust-toolchain.toml     pin 1.97.1 ＋ rustfmt / clippy components（edition 2024）
 core/{colorpack,stroke,render,document,history,oplog,app-state,engine}/
-tools/baker/            bin
+tools/baker/            bin ＋ lib（`[lib] name = "baker"`）
 xtask/                  bin
 ```
 
@@ -33,6 +33,10 @@ M0 的 crate 全是空殼：`Cargo.toml` ＋ 空 `lib.rs`，**但依賴邊要照
 | `history` | colorpack, oplog |
 | `app-state` | — |
 | `engine` | app-state, document, history, render |
+| `baker` | colorpack |
+| `xtask` | baker |
+
+**`baker` 同時是 bin 與 lib，`xtask` 依賴它而不 shell out。** `bake` 與 `gen-torture` 都直接呼叫 `baker::` 的函式——shell out 拿不回結構化的錯誤，只拿得到 stdout。代價是 `xtask` 的編譯時間掛上 baker 的依賴樹（`png`、`zip`、`jpeg-encoder`）。
 
 **`render/Cargo.toml` 現在就真的列 wgpu**，即使還沒有程式碼。
 代價是 CI cold build 多兩三分鐘（有 cache 後不痛），
@@ -93,6 +97,8 @@ M0 驗收「刻意在 `stroke` 加 wgpu 依賴時 lint 會失敗」**做成 xtas
 | `lint-ios` | **S0 實作**。純文字檢查 `apps/ios/ColorApp/**` 不得出現 `RustEngine`、不得 `import colorlull_engine`。把驗收「App Shell 沒有一行直接引用 `RustEngine`」從目視變成機械檢查，跑在 Linux 上零成本 |
 | `gen-torture` | M0 實作。決定性產生 `assets/source/torture-01/`，重跑逐位元相同（否則 LFS 每跑一次胖一份） |
 | `bake <dir>` | 指令位，body 回傳「M1 實作」錯誤訊息 |
+| `gen-torture` | M0 實作、**M1 移進 `baker::synth`**。決定性產生 `assets/source/torture-01/`，重跑逐位元相同（否則 LFS 每跑一次胖一份）。順帶寫出 `synth-lock.json`，讓「改了生成器卻沒重跑」在 CI 失敗 |
+| `bake <dir> [--out] [--report]` | **M1 實作**。直接呼叫 `baker::bake()`。exit code：0 通過（可含警告）／1 有 Error／2 baker 自身故障 |
 | `ios` | **S0 實作**。host cdylib 生 Swift binding ＋ 兩個 iOS `.a` 打包 `.xcframework`，重算 `core/engine/ffi-lock.toml` |
 | `verify-generated` | **S0 實作**。重新生成後比對 `ffi-lock.toml` 指紋，跑在 Linux（見 `specs/ffi-contract.md §6`） |
 

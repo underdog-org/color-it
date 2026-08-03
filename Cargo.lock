@@ -3479,6 +3479,7 @@ dependencies = [
  "anyhow",
  "camino",
  "clap",
+ "colorlull-baker",
  "png",
  "serde",
  "serde_json",

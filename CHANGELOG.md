@@ -25,6 +25,35 @@
   ——CI 的 `-scheme` 只讀得到 shared scheme
 - `EngineCanvasView` 用 `CAMetalLayer` 而非 `MTKView`：後者自帶 draw loop，與 `§10.3`
   「渲染由 FrameDriver 驅動」是競爭機制。**列為 E1 待決項**並回寫 `architecture.md §10.3`
+- **直式比例正名 `4:5` → `3:4`，runtime `1536×1920` → `1536×2048`**。母帶 3072×4096 本來就是 3:4；
+  3072→1536 是 ÷2 而 4096→1920 是 ÷2.133，兩軸倍率不同會壓扁畫面，也讓 `architecture §9.1`
+  「4096→2048 是整數倍降採樣」在直式路徑上不成立。像素數 3.15M 仍低於 1:1 的 4.19M，
+  「以 1:1 為記憶體上界」的論證不變。回寫 `prd §5.3 §6 §9`、`architecture §4.1.1 §9.1 §9.3`、
+  `assets-spec §3 §5 §7`、`roadmap/M0 M1`。匯出 letterbox 的 4:5（IG 直式）是社群平台目標比例，**不受影響**
+- **階段內 fail-fast 收窄到「算不下去的那兩條」**：`size-mismatch`（逐像素會越界）與
+  `unique-color-overflow`（CC 會切出幾百萬區）。原本 `canvas-size` 被綁進 structural failure、
+  `reserved-color`/`tiny-color-area` 被綁進 flats broken，結果是繪師改完尺寸重交才第一次看到縫隙問題
+  ——正是 `§4.2` 那條「來回從 N 天變 1 天」要消除的情境
+- `flats` 唯一色數改掛 `Report` 而非 `Summary`：`§2.6` 要求一律列出，而被退件的素材才是最需要它的地方。
+  快篩命中時掃描提前中止，該值是下界，渲染成 `≥N` 而不是假裝是實際值
+- `region_count` / `difficulty` 改依**輸出解析度**的存活區域數判定，不再靠 `region-count-drift`
+  是 Error 維持的不變式
+- zip 的 unix 權限與 host system 由「不寫」改為**顯式釘死** `0o644` / `System::Unix`：zip 格式沒有
+  「不寫」這個選項，而 crate 預設的 system 依 `cfg!(windows)` 分歧，會讓「同輸入位元相同」
+  只在同一個 OS 家族內成立
+- **`content_hash` 加凍結向量**（兩層：`hash::content_hash` 最小輸入 ＋ 完整 sample pack）。
+  在此之前只驗「改內容會換 hash」，把長度前綴改成 BE 或調換 `ENTRY_ORDER` 測試都會全綠——
+  而 `§3.3` 的整段立論是 hash 漂移一次等於全世界的使用者作品同時失效
+- `ColorPack::open()` 補**重算 hash 比對**與 `region_ids < region_count` 驗證；
+  `check_schema_version` 收嚴成契約的 `^[0-9]+\.[0-9]+$`（原本 `"1"`、`"1.0.0"` 都會通過）
+- **`torture-01` 首次有自動化證據**：一條 e2e 直接烘它（生成器現場產生，不讀 LFS），斷言通過且
+  唯一診斷是 `region-count-range`。另補 `synth-lock.json` drift 守門——改了 `synth.rs` 卻忘了跑
+  `gen-torture`，測試會失敗。hash 取原始 RGBA 而非 PNG bytes，避免綁到 `png` crate 的 deflate 實作
+- `unassigned-pixel` 由「Master ＋ Output」降回**純 Master**：輸出階段恆真（majority 必定產出既有 ID），
+  留一條永不觸發的檢查不如降級，實作端只保留 `debug_assert`
+- `architecture §9.2` 補降採樣對象是 ID map、majority 平手規則、4-連通、膨脹的精確語意；
+  `§9.4` 釐清 `palette[]`（去重色票給 UI）與 `suggested_color`（逐區）的分工。
+  `specs/baker-core-design.md` 升 v1.2，依實作對齊 §1／§3.2／§4.1／§4.2／§5
 - `tools/baker` 管線落地：source → 母帶檢查 → connected components → 合成白底 → 降採樣
   → 膨脹 → 輸出檢查 → 逐區取建議色 → 縮圖 → `.colorpack`。`baker` 同時是 bin 與 lib
   （`bake(dir, opts) -> Report` 要被 xtask 當 library 呼叫，不 shell out，錯誤訊息才帶得回來）

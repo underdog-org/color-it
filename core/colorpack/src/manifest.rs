@@ -41,6 +41,9 @@ pub enum Aspect {
 }
 
 impl Aspect {
+    /// 順序即 `contracts/colorpack.schema.json` 的 enum 順序（有跨檢測試）。
+    pub const ALL: [Aspect; 2] = [Aspect::Square, Aspect::Portrait];
+
     /// 由母帶尺寸推導。不是允許的兩種尺寸就是 `None`。
     pub fn from_master_size(w: u32, h: u32) -> Option<Self> {
         match (w, h) {
@@ -67,6 +70,9 @@ pub enum Difficulty {
 }
 
 impl Difficulty {
+    /// 順序即 `contracts/colorpack.schema.json` 的 enum 順序（有跨檢測試）。
+    pub const ALL: [Difficulty; 3] = [Difficulty::Easy, Difficulty::Medium, Difficulty::Focused];
+
     /// 門檻見 `assets-spec §8`：≤60 輕鬆｜61–200 適中｜>200 專注。
     pub fn from_region_count(n: u32) -> Self {
         if n <= DIFFICULTY_EASY_MAX {
@@ -75,6 +81,14 @@ impl Difficulty {
             Self::Medium
         } else {
             Self::Focused
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Easy => "easy",
+            Self::Medium => "medium",
+            Self::Focused => "focused",
         }
     }
 }
@@ -118,14 +132,27 @@ impl Category {
 
 /// `major.minor` 的 major 必須與本 crate 相同；minor 不同視為相容。
 pub fn check_schema_version(found: &str) -> Result<(), Error> {
-    let major = |s: &str| s.split('.').next().unwrap_or_default().to_owned();
-    if major(found) == major(SCHEMA_VERSION) {
-        Ok(())
-    } else {
+    let reject = || {
         Err(Error::SchemaVersion {
             found: found.to_owned(),
             expected: SCHEMA_VERSION,
         })
+    };
+    // 形狀本身也要驗。契約 pattern 是 `^[0-9]+\.[0-9]+$`
+    // （`contracts/colorpack.schema.json`）——只切第一個 `.` 的話 `"1"`、`"1.0.0"`
+    // 都會通過，reader 就比契約寬，而寬的那一端遲早會收到寫端不打算支援的東西。
+    let mut parts = found.split('.');
+    let (Some(major), Some(minor), None) = (parts.next(), parts.next(), parts.next()) else {
+        return reject();
+    };
+    let numeric = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
+    if !numeric(major) || !numeric(minor) {
+        return reject();
+    }
+    if major == SCHEMA_VERSION.split('.').next().unwrap_or_default() {
+        Ok(())
+    } else {
+        reject()
     }
 }
 
@@ -154,6 +181,18 @@ mod tests {
     fn unknown_major_is_rejected_minor_is_not() {
         assert!(check_schema_version("1.0").is_ok());
         assert!(check_schema_version("1.7").is_ok());
+        assert!(check_schema_version("1.12").is_ok());
         assert!(check_schema_version("2.0").is_err());
+    }
+
+    /// reader 不能比契約寬：schema 的 pattern 是 `^[0-9]+\.[0-9]+$`。
+    #[test]
+    fn malformed_versions_are_rejected_even_with_the_right_major() {
+        for bad in ["1", "1.", ".0", "1.0.0", "1.x", "", "v1.0", " 1.0"] {
+            assert!(
+                check_schema_version(bad).is_err(),
+                "{bad:?} 不是合法的 schema_version"
+            );
+        }
     }
 }

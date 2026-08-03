@@ -4,9 +4,8 @@ mod ios;
 mod lint_ios;
 mod metadata;
 mod policy;
-mod torture;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
@@ -32,6 +31,12 @@ enum Command {
     Bake {
         /// 素材來源目錄
         dir: PathBuf,
+        /// 輸出目錄。預設 <repo>/assets/packs
+        #[arg(long)]
+        out: Option<PathBuf>,
+        /// 額外把報告寫成 JSON
+        #[arg(long, value_name = "PATH")]
+        report: Option<PathBuf>,
     },
     /// 產生 .xcframework ＋ Swift binding → apps/ios/Generated/
     Ios,
@@ -42,14 +47,31 @@ enum Command {
 fn main() -> Result<()> {
     match Cli::parse().command {
         Command::LintDeps => lint_deps(),
-        Command::LintIos => lint_ios::run(&metadata::load()?.root),
-        Command::GenTorture => torture::run(&metadata::load()?.root),
-        Command::Bake { .. } => {
-            bail!("cargo xtask bake 尚未實作（M1）。流程見 docs/architecture.md §9.2")
-        }
+        Command::GenTorture => gen_torture(),
+        Command::Bake { dir, out, report } => bake(&dir, out, report),
         Command::Ios => ios::run(&metadata::load()?),
         Command::VerifyGenerated => ios::verify_generated(&metadata::load()?),
     }
+}
+
+fn gen_torture() -> Result<()> {
+    let dir = baker::synth::write_torture(&metadata::load()?.root)?;
+    println!("gen-torture：→ {}", dir.display());
+    Ok(())
+}
+
+fn bake(dir: &Path, out: Option<PathBuf>, report_json: Option<PathBuf>) -> Result<()> {
+    let root = metadata::load()?.root;
+    let opts = baker::BakeOptions {
+        out_dir: out.unwrap_or_else(|| root.join("assets/packs")),
+        report_json,
+    };
+    let report = baker::bake(dir, &opts)?;
+    print!("{}", report.to_text());
+    if report.has_error() {
+        bail!("bake：{} 未通過驗證", report.id);
+    }
+    Ok(())
 }
 
 fn lint_deps() -> Result<()> {

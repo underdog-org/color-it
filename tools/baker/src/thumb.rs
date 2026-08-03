@@ -64,12 +64,39 @@ mod tests {
         assert_eq!(&jpeg[..2], &[0xff, 0xd8], "應該是 JPEG SOI");
     }
 
+    /// 從 SOF0 段讀出 `(width, height)`。只斷言「編碼成功」的話，factor 算錯
+    /// 也會綠燈——而 factor 是整數除法，這正是最容易靜默壞掉的地方。
+    fn jpeg_size(jpeg: &[u8]) -> (u16, u16) {
+        let mut i = 2; // 跳過 SOI
+        while i + 4 <= jpeg.len() {
+            assert_eq!(jpeg[i], 0xFF, "在 offset {i} 不是 marker 邊界");
+            let marker = jpeg[i + 1];
+            let len = u16::from_be_bytes([jpeg[i + 2], jpeg[i + 3]]) as usize;
+            if marker == 0xC0 {
+                let h = u16::from_be_bytes([jpeg[i + 5], jpeg[i + 6]]);
+                let w = u16::from_be_bytes([jpeg[i + 7], jpeg[i + 8]]);
+                return (w, h);
+            }
+            i += 2 + len;
+        }
+        panic!("找不到 SOF0");
+    }
+
+    fn thumb_size(w: u32, h: u32) -> (u16, u16) {
+        let labels = vec![0u32; (w * h) as usize];
+        let lineart = vec![255u8; (w * h * 4) as usize];
+        let jpeg = render(w, h, &labels, &[[10, 20, 30]], &lineart, None).unwrap();
+        jpeg_size(&jpeg)
+    }
+
     #[test]
     fn output_long_edge_is_512() {
-        let labels = vec![0u32; 1024 * 1024];
-        let lineart = vec![255u8; 1024 * 1024 * 4];
-        let jpeg = render(1024, 1024, &labels, &[[10, 20, 30]], &lineart, None).unwrap();
-        // SOF0 內含尺寸；這裡只確認編碼成功且非空
-        assert!(jpeg.len() > 100);
+        assert_eq!(thumb_size(1024, 1024), (LONG_EDGE as u16, LONG_EDGE as u16));
+    }
+
+    /// 3:4 母帶：兩軸共用同一個 factor，長邊才是 512，比例不能被壓扁。
+    #[test]
+    fn portrait_thumb_keeps_its_aspect() {
+        assert_eq!(thumb_size(768, 1024), (384, LONG_EDGE as u16));
     }
 }

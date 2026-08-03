@@ -137,6 +137,17 @@ impl Coords {
     }
 }
 
+/// `flats` 的唯一色數（§2.6）。
+///
+/// 掛在 `Report` 而不是 `Summary`：規格要求**一律列出**，而拒收時最需要它——
+/// 「之後要調 `MAX_UNIQUE_COLORS` 才有依據」講的正是被退件的那些素材。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct UniqueColors {
+    pub count: usize,
+    /// 快篩命中時掃描提前中止，`count` 是下界而非實際值。
+    pub exact: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Summary {
     pub id: String,
@@ -146,8 +157,6 @@ pub struct Summary {
     pub difficulty: &'static str,
     pub category: &'static str,
     pub has_shade: bool,
-    /// `flats` 的實際唯一色數。一律列出，之後要調 `MAX_UNIQUE_COLORS` 才有依據（§2.6）。
-    pub unique_colors: usize,
     pub content_hash: String,
     pub output: String,
 }
@@ -157,6 +166,8 @@ pub struct Report {
     pub id: String,
     pub source: String,
     pub diagnostics: Vec<Diagnostic>,
+    /// 一讀到 `flats` 就有，與是否通過無關。
+    pub unique_colors: Option<UniqueColors>,
     /// 只有真的打包出來才有。
     pub summary: Option<Summary>,
 }
@@ -175,7 +186,6 @@ impl Report {
             .count()
     }
 
-    /// 是否出現過某個 `code`——拒收測試斷言用。
     pub fn find(&self, code: &str) -> Option<&Diagnostic> {
         self.diagnostics.iter().find(|d| d.code == code)
     }
@@ -219,17 +229,21 @@ impl Report {
                 let _ = writeln!(out, "      {note} {}{suffix}", list.join(" "));
             }
         }
+        if let Some(u) = &self.unique_colors {
+            let prefix = if u.exact { "" } else { "≥" };
+            let note = if u.exact { "" } else { "（快篩中止）" };
+            let _ = writeln!(out, "  flats 唯一色 {prefix}{}{note}", u.count);
+        }
         if let Some(s) = &self.summary {
             let _ = writeln!(
                 out,
-                "  ✓ {}×{} {} ／ {} 區 ／ {} ／ shade {} ／ 唯一色 {}",
+                "  ✓ {}×{} {} ／ {} 區 ／ {} ／ shade {}",
                 s.canvas_size[0],
                 s.canvas_size[1],
                 s.aspect,
                 s.region_count,
                 s.difficulty,
                 if s.has_shade { "有" } else { "無" },
-                s.unique_colors
             );
             let _ = writeln!(out, "  → {}", s.output);
             let _ = writeln!(out, "  {}", s.content_hash);
@@ -265,8 +279,45 @@ mod tests {
             id: "x".into(),
             source: "x".into(),
             diagnostics: vec![d],
+            unique_colors: None,
             summary: None,
         };
         assert!(report.to_text().contains("另有 84 處"));
+    }
+
+    /// §2.6「報告中一律列出實際唯一色數」——含被拒收的素材。
+    #[test]
+    fn unique_colors_are_printed_even_when_the_asset_is_rejected() {
+        let report = Report {
+            id: "x".into(),
+            source: "x".into(),
+            diagnostics: vec![Diagnostic::error(code::TINY_COLOR_AREA, Stage::Master, "x")],
+            unique_colors: Some(UniqueColors {
+                count: 171,
+                exact: true,
+            }),
+            summary: None,
+        };
+        let text = report.to_text();
+        assert!(text.contains("唯一色 171"), "{text}");
+        assert!(!text.contains("≥"), "{text}");
+    }
+
+    /// 快篩中止時 `count` 是下界，文字必須說清楚，不能假裝是實際值。
+    #[test]
+    fn a_screened_out_count_is_rendered_as_a_lower_bound() {
+        let report = Report {
+            id: "x".into(),
+            source: "x".into(),
+            diagnostics: Vec::new(),
+            unique_colors: Some(UniqueColors {
+                count: 1025,
+                exact: false,
+            }),
+            summary: None,
+        };
+        let text = report.to_text();
+        assert!(text.contains("唯一色 ≥1025"), "{text}");
+        assert!(text.contains("快篩中止"), "{text}");
     }
 }

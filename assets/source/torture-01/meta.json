@@ -1,6 +1,6 @@
 {
-  "id": "torture-01",
-  "title": "Torture Test 01",
   "category": "mandala",
-  "notes": "由 `cargo xtask gen-torture` 決定性產生，不是繪師交付。刻意含細碎區域、單像素縫隙與面積 < 200px 碎片，用來壓 baker 的區域抽取。4:5 且無 shade，跑 has_shade = false 那條路徑。category 取 mandala 只因幾何圖形最接近，不代表難度分級。"
+  "id": "torture-01",
+  "notes": "由 `cargo xtask gen-torture` 決定性產生，不是繪師交付。12 個壓力區塊（密集格線、細長條、同心環、放射楔形、梳齒迴廊、對角同色重用、極端長寬比碎片、貼畫布邊特徵），所有特徵最短邊 ≥8px 且對齊偶數邊界，降採樣＋膨脹後仍存活。3:4 且無 shade，跑 has_shade = false 那條路徑。category 取 mandala 只因幾何圖形最接近，不代表難度分級。",
+  "title": "Torture Test 01"
 }
