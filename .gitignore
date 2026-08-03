@@ -17,3 +17,9 @@ DerivedData/
 
 # 第三方來源（不進git追蹤）
 vendor/*
+
+# Pencil 設計稿
+design/
+
+# 開發用 worktree
+/.claude/worktrees/
