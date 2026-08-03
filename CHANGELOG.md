@@ -25,6 +25,20 @@
   ——CI 的 `-scheme` 只讀得到 shared scheme
 - `EngineCanvasView` 用 `CAMetalLayer` 而非 `MTKView`：後者自帶 draw loop，與 `§10.3`
   「渲染由 FrameDriver 驅動」是競爭機制。**列為 E1 待決項**並回寫 `architecture.md §10.3`
+- `tools/baker` 管線落地：source → 母帶檢查 → connected components → 合成白底 → 降採樣
+  → 膨脹 → 輸出檢查 → 逐區取建議色 → 縮圖 → `.colorpack`。`baker` 同時是 bin 與 lib
+  （`bake(dir, opts) -> Report` 要被 xtask 當 library 呼叫，不 shell out，錯誤訊息才帶得回來）
+- **色彩空間判定不看 iCCP 名稱，改解 ICC tag table 比對 colorant**（不引第三方 crate）。
+  實測 `kirby-demo-1` 的 `flats`/`reference` 帶的是泛用名 `ICC Profile`，照名稱判會誤退合格素材。
+  同時發現：這四張圖的 `wtpt` 存的是 **D65**（ICC v2 慣例存實際白點）而不是 PCS 的 D50，
+  且 Display P3 的 `wtpt` 同樣是 D65——**白點根本分不出 sRGB 與 P3**，真正的判準只有
+  `rXYZ`/`gXYZ`/`bXYZ`（兩者差 0.08，容差取 0.02）。白點只用來擋「白點根本不是這兩個」的怪 profile
+- 判定順序定為 `iCCP` → `sRGB` chunk → `gAMA`+`cHRM` → 皆無即通過（`assets-spec §3` 明列）。
+  iCCP 存在但解不出 colorant 時**往下一個訊號走而非拒收**——寧可漏放也不要誤退合格素材
+- `shade` 的 luma < 60 判定跑在**合成白底之後**：交透明底的 `shade` 在合成前 RGB 是 0，
+  照原值判會把每一張合規的透明底 `shade` 都退掉
+- 新增 `source-incomplete` 檢查碼（`§4.1` 清冊同步更新）：缺 `lineart`/`flats`/`reference` 時
+  若走 exit 2（baker 自身故障）會把繪師的交付疏漏誤報成工具壞掉
 - `core/colorpack` 落地：`.colorpack` 容器的讀寫、`manifest` / `regions.json` 型別、R16 RLE、
   正規化 `content_hash`。**reader 與 writer 同時做**（不留到 E1）——round-trip 是驗證 writer
   最便宜的手段，而 reader 只是 zip central directory 解析加 RLE 解碼

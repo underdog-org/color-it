@@ -41,5 +41,7 @@ internal = ["app-state", "document", "history", "render"]
 # ── 工具 ──────────────────────────────────────────────────────────
 
 [crates.baker]
+internal = ["colorpack"]
 
 [crates.xtask]
+internal = ["baker"]
