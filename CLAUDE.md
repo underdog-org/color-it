@@ -10,11 +10,13 @@ iOS 著色 App。核心是「**受區域約束的塗抹**」——不是繪圖�
 串流版與 `generate_dabs` 批次版共用同一份實作，32 條測試無 GPU 全綠（三條 golden 標 `#[ignore]`，參數調校中）。
 `core/document` 已落地最小 apply（`Op`／`Effect`／`palette`／`colored_regions`，無 GPU），`core/render` 補上油漆桶那一列：`Transform::canvas_pos`＋`region_at`、`ErasePass`（`shaders/erase_clear.wgsl`）、`FillAnimator`＋`render_with_dt`。
 **`E1-input` 已落地**：`RustEngine` 不再是 S0 mock——`new` 真的解析 `.colorpack`，`attach_surface`／`render`／`tap` 全部接到 `render`／`document`（`engine` 因此多一條 `colorpack` 依賴，`deps-policy.toml` 已改）；iOS 端加 `FrameDriver`（weak proxy ＋ `.common`）與 `InputAdapter`，`EngineCanvasView` 收全部 touch。Rust 16 條、iOS 24 條測試全綠。
-**下一步**：Pass 1／2（`E1-stroke §7`–`§9`）→ Mask Mode A／B 即時切換 → `E1-perf`。
+**`E1-stroke §7`–`§9` 與 Mask Mode 已落地**：`render` 補 `StrokePass`（instanced dab → `T_wet`，程序生成的軟圓 tip array、`build_up` 兩條 pipeline、增量 bbox scissor、4096 分批各自 submit）、`CommitPass`（`T_wet × opacity × mask` → `T_paint` premultiplied、收尾清 `T_wet`）、`Bounds`；`engine/src/brush.rs` 接上 `StrokeBuilder`（`deps-policy` 開 `engine → stroke`），`end_stroke` 走「清 → 以真實樣本重建 → commit」。`set_mask_mode` FFI ＋ iOS `#if DEBUG` toggle 給 D4。
+**下一步**：**只剩真機量測**——`docs/perf-baseline.md` 是空表，D2／D3／D4 全部待執行（流程在 `E1-perf`）。程式面 E1 已收尾。
 > `EngineError` 多了 `Surface` 變體（`attach_surface` 從「永遠 Ok」變成真的會失敗），遷移記錄在 `contracts.md ⑤`。
 > `E1-input.md §12` 是執行期決議（`tap` 由 `touchesBegan` 依工具分流、`radius` 送點不送像素、`Transform` 由 engine 自算 fit、iOS 測試 fixture 進 git）——動 Bridge 或 `engine` 之前先讀。
 > composite shader 的 `canvas_pos` 已改吃 `@builtin(position)`——UV 再乘一次 `screen_size` 會差一個 ulp，邊界像素會 floor 到隔壁區。
-> Pass 1／2 動工前**先讀 `E1-stroke.md §14` 執行期決議**——`engine` → `stroke` 還不在 `deps-policy.toml` 裡。
+> `T_wet` 沒有 `COPY_SRC`（單筆暫存不進 undo），所以 Pass 1 的正確性一律**從 `T_paint` 讀回**驗證。
+> `set_mask_mode` 是排定要移除的 FFI（契約 C13），D4 拍板後與 Swift toggle 一起刪，不算 major bump。
 > `attach_surface` 需要真的 `CAMetalLayer`，無自動測試——模擬器上 `tap` 會落空（沒有 `region_ids`），真機才驗得到。
 > M0 交出第一份 `.colorpack` 之前，composite 與 `thumb.jpg` 的逐像素比對做不了（`E1-composite §9` 第 1 條）。
 

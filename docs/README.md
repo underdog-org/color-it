@@ -24,7 +24,8 @@
 | [specs/E1-bucket.md](./specs/E1-bucket.md) | `document.apply(Op)` 最小版、`tap` → region ID、擴散動畫 CPU 側 | 短 |
 | [specs/E1-input.md](./specs/E1-input.md) | present 路徑定案、FrameDriver、`InputAdapter`、座標系、`cancelStroke` | 短 |
 | [specs/E1-perf.md](./specs/E1-perf.md) | motion-to-photon 流程、記憶體對帳、D2／D3／D4 劇本、調校項總表 | 短 |
-| [contracts.md](./contracts.md) | FFI 的**現況**：表面速查表、語意條款 C1–C8、semver 判定、遷移記錄 | 102 行 |
+| [perf-baseline.md](./perf-baseline.md) | **實測數字**（流程在 `E1-perf`）：各裝置的 m2p／frame p99／記憶體，調校記錄 | 短 |
+| [contracts.md](./contracts.md) | FFI 的**現況**：表面速查表、語意條款 C1–C13、semver 判定、遷移記錄 | 短 |
 
 `roadmap/` 已全部拆檔，一次只讀需要的那一份。
 六份 `E1-*` 也是一組，**先讀 `E1-wgpu`**——其餘五份以它為共同輸入。
@@ -80,6 +81,7 @@
 | 動油漆桶、`document.apply`、擴散動畫的推進 | `E1-bucket.md` |
 | 動 iOS 輸入、FrameDriver、座標系 | `E1-input.md` |
 | 要量什麼、怎麼量、D2／D3／D4 怎麼跑 | `E1-perf.md` |
+| 現在量到多少、某個參數是量出來的還是猜的 | `perf-baseline.md` |
 | 為什麼是這樣切、哪份擁有哪個型別 | `E1-spec-plan.md` |
 
 ### 排程面（roadmap/）

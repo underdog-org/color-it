@@ -320,6 +320,7 @@ final class SpyEngine: EngineProtocol {
     }
 
     func setViewport(_ transform: Transform) {}
+    func setMaskMode(_ mode: MaskMode) {}
 
     func save() throws {}
     func exportPNG() throws -> Data { Data() }

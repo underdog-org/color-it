@@ -38,7 +38,11 @@ internal = ["colorpack", "oplog"]
 [crates.engine]
 # `colorpack` 是 E1 加的：`new` 要真的 `ColorPack::open`，而 `attach_surface`
 # 要把同一份 pack 交給 `render`。方向仍然只向下（`engine` 在最上層）。
-internal = ["app-state", "colorpack", "document", "history", "render"]
+#
+# `stroke` 是 Pass 1／2 落地時加的（`E1-stroke.md §14` 決議 C）：扁平 `InputSample`
+# → `Vec2` 的轉換、以及 `app_state::BrushPreset`（筆刷 ID）→ 十四欄參數的對應
+# 都住在 `engine`——`stroke` 不依賴 `app-state`（同層），這個對應沒有別的地方能放。
+internal = ["app-state", "colorpack", "document", "history", "render", "stroke"]
 
 # ── 工具 ──────────────────────────────────────────────────────────
 

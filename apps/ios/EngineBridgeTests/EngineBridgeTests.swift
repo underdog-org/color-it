@@ -175,6 +175,9 @@ final class EngineBridgeTests: XCTestCase {
             ("redo", { $0.redo() }),
             ("render", { $0.render() }),
             ("setViewport", { $0.setViewport(Transform(scale: 2, tx: 3, ty: 4)) }),
+            // mask mode 不在 `UiState` 裡：兩個實作都不得因為切它而 emit。
+            ("setMaskMode loose", { $0.setMaskMode(.loose) }),
+            ("setMaskMode strict", { $0.setMaskMode(.strict) }),
         ]
 
         for (label, operation) in operations {

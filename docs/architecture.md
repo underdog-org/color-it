@@ -233,9 +233,18 @@ color-it/
 | `T_erase` R8 | 4 MB |
 | `T_wet` R8 | 4 MB |
 | **貼圖小計** | **64 MB** |
+| swapchain drawable | **待實測**（估 24–36 MB） |
+| `region_ids` CPU 副本 | **待實測**（估 8 MB，系統 RAM 不是 GPU） |
 | Undo pool（見下） | **上限 64 MB** |
 | colorpack 解碼暫存 | 約 16 MB |
-| **峰值預算** | **約 145 MB** |
+| **峰值預算** | **約 145 MB ＋ 上面兩列** |
+
+> **swapchain 與 `region_ids` 兩列是 2026-08-03 補的**（`specs/E1-wgpu.md §4.2`）：
+> 前者是螢幕解析度 × `Bgra8` × `maximumDrawableCount`，後者是常駐副本而非解碼暫存
+> （`§5.1`：油漆桶要**同步**拿到 region ID，單像素 readback 至少一 frame stall）。
+> 兩筆合計約佔原預算的 22–30%，而原表完全沒列。
+> **數字由 E1 的實機量測回填**（`specs/E1-perf.md §4` 的三步對帳），在那之前不改
+> 「約 145 MB」這個結論——拿估算值改預算表等於用猜的數字做 D4 判定。
 
 **Undo pool 必須有記憶體上限。** 一筆畫可能碰到 4–16 個 256×256 tile（RGBA8 每 tile 256KB），即 1–4MB／步。若不設限，20 步就可能吃掉 80MB，而使用者可以連續畫數百筆。
 
@@ -1506,6 +1515,7 @@ v1 只生成 Swift；Kotlin 是加一行設定的事。
 | **motion-to-photon 延遲** | 高速攝影（240fps 以上）拍攝手指與螢幕，逐格計算 | 決定「跟手」的主觀感受，本產品最重要的單一指標 |
 | frame time 分佈 | 平台 profiler（Instruments / Perfetto），看 p99 而非平均 | 掉 frame 比平均慢更影響體感 |
 | **記憶體峰值** | 開啟 1:1 最大畫布 ＋ 連續塗抹 30 秒 ＋ undo pool 塞滿 | **對照 §4.1.1 的 145MB 預算**。超標則在 E1 就調整畫布解析度——此時繪師尚未量產，代價最低 |
+| ↑ **E1 的例外** | **E1 沒有 undo pool**，照原劇本量會得到一個好看但無意義的數字。E1 改用連填 20 個區域 ＋ 切出切回，並走 `specs/E1-perf.md §4` 的**三步對帳**（實測 → 回填 §4.1.1 缺的兩列 → 加上 E3 undo pool 估算再判定） | |
 | 首次可互動時間 | 從點擊線稿到可下筆 | 影響 Gallery → Canvas 的流暢感 |
 | `.colorpack` 大小 | baker 輸出統計 | 影響下載體驗與 R2 成本 |
 | Undo 提交延遲 | commit 到可再次下筆的間隔 | GPU readback 若同步會造成頓挫 |

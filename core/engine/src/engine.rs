@@ -8,14 +8,25 @@ use std::fs::File;
 use std::io::BufReader;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
+use app_state::ToolKind;
 use colorpack::ColorPack;
 use document::{Effect, Op};
 use render::{Frame, SurfaceHandle as RenderSurfaceHandle, encode};
 
+use crate::brush::{self, ActiveStroke};
 use crate::error::EngineError;
-use crate::ffi::{InputSample, Rgba, SurfaceHandle, Tool, Transform, UiState};
+use crate::ffi::{InputSample, MaskMode, Rgba, SurfaceHandle, Tool, Transform, UiState};
 use crate::inner::{CANVAS_BACKGROUND, Inner};
 use crate::listener::StateListener;
+
+/// 丟掉進行中的筆畫：清掉它畫過的 `T_wet`，不 commit、不 apply。
+///
+/// `cancel_stroke` 與「上一筆沒收乾淨就再起一筆」共用——兩者要做的事完全相同。
+fn discard(inner: &mut Inner) {
+    if let Some(bounds) = inner.stroke.take().and_then(|s| s.bounds()) {
+        inner.render.discard_wet(bounds);
+    }
+}
 
 /// 未實作的 infallible 方法用它報一次到——不是 panic、不是回傳錯誤。
 ///
@@ -156,25 +167,116 @@ impl RustEngine {
         Rgba::from(self.lock().app.color)
     }
 
+    /// 起筆（`E1-stroke §2`）。`s.x` / `s.y` 是**螢幕像素**，與 `tap` 同一套約定。
+    ///
+    /// 只有筆刷會產生筆畫：橡皮擦是 E2、油漆桶走 `tap`。非筆刷工具下這裡什麼都不做，
+    /// 於是 `append_samples` 也自然落空——不需要第二個「現在能不能畫」的旗標。
     pub fn begin_stroke(&self, s: InputSample) {
-        let _ = s;
-        self.mutate(|inner| inner.stroke_active = true);
+        self.mutate(|inner| {
+            // 上一筆沒收乾淨就再起一筆（Bridge 的事件順序問題）：先把它丟掉，
+            // 否則 `T_wet` 會殘留上一筆的痕跡，而它永遠不會再被清。
+            discard(inner);
+
+            let ToolKind::Brush(id) = inner.app.tool else {
+                return;
+            };
+            let preset = brush::preset(id);
+            let sample = brush::to_sample(&inner.transform, &s);
+
+            // 起筆處的 region 決定 Mode A 遮罩誰。畫布外起筆給 0——那一筆的
+            // `T_wet` 也在畫布外，commit 的 scissor 會把它整個裁掉。
+            let region_id = inner
+                .render
+                .resources()
+                .and_then(|r| r.region_at([sample.pos.x, sample.pos.y]))
+                .unwrap_or(0);
+
+            inner.stroke_seq = inner.stroke_seq.wrapping_add(1);
+            let mut active = ActiveStroke::new(
+                preset,
+                inner.app.size,
+                inner.stroke_seq,
+                encode(inner.app.color),
+                inner.app.opacity,
+                region_id,
+            );
+
+            let build_up = active.build_up();
+            let drawn = inner
+                .render
+                .draw_dabs(active.push_real(&[sample]), build_up);
+            active.grow(drawn);
+
+            inner.stroke = Some(active);
+            inner.sync_mask();
+        });
     }
 
-    /// 唯一的高頻路徑，批次進來（契約 C3）。S0 維護狀態機、樣本丟棄。
+    /// 唯一的高頻路徑，批次進來（契約 C3）。
+    ///
+    /// 真實樣本進 builder、預測點另走一條（`E1-stroke §14` 決議 H）——讓預測點更新
+    /// 濾波器狀態的話，下一個真實樣本的濾波就建立在猜測上，而誤差會留在筆畫裡。
     pub fn append_samples(&self, s: Vec<InputSample>) {
-        let _ = s;
-        // 沒 begin 過就 append 只是 Bridge 的事件順序問題，不是 panic 的理由；
-        // S0 兩種情況都丟棄樣本。仍走 mutate，維持「只有一條路能碰 Inner」。
-        self.mutate(|_| {});
+        self.mutate(|inner| {
+            // 沒 begin 過就 append 只是 Bridge 的事件順序問題，不是 panic 的理由。
+            let Some(active) = inner.stroke.as_mut() else {
+                return;
+            };
+            let (real, predicted): (Vec<_>, Vec<_>) = s
+                .iter()
+                .map(|s| brush::to_sample(&inner.transform, s))
+                .partition(|s| !s.predicted);
+
+            let render = &mut inner.render;
+            let build_up = active.build_up();
+            let drawn = render.draw_dabs(active.push_real(&real), build_up);
+            active.grow(drawn);
+
+            // 預測點只影響當前 frame，不進 oplog（契約 C4）。它畫上去的痕跡由
+            // `end_stroke` 的重建清掉，所以 bbox 必須把它算進去。
+            if !predicted.is_empty() {
+                let drawn = render.draw_dabs(&active.predicted(&predicted), build_up);
+                active.grow(drawn);
+            }
+        });
     }
 
+    /// 抬筆：重建 `T_wet` → Pass 2 commit → `document.apply`（`E1-stroke §9`）。
+    ///
+    /// **先重建再 commit**：`T_wet` 上還留著預測點畫的一截，直接 commit 的話
+    /// 筆畫尾端會比使用者實際抬筆處長出來。成本是每筆多跑一次 Pass 1，一筆一次。
     pub fn end_stroke(&self) {
-        self.mutate(|inner| inner.stroke_active = false);
+        self.mutate(|inner| {
+            let Some(active) = inner.stroke.take() else {
+                return;
+            };
+            let (color, opacity, build_up) = (active.color, active.opacity, active.build_up());
+            let (dabs, drawn) = active.finish();
+
+            if let Some(drawn) = drawn {
+                inner.render.discard_wet(drawn);
+                let rebuilt = inner.render.draw_dabs(&dabs, build_up);
+                // `finish()` 補畫的最後一段可能超出串流期間的範圍，commit 要蓋得住。
+                let bounds = rebuilt.map_or(drawn, |b| drawn.union(b));
+                inner.render.commit_stroke(color, opacity, bounds);
+            }
+
+            // 鐵律 #3：狀態變更只有 `document.apply` 一條路。E1 的 `document`
+            // 還不追蹤筆畫（回 `Effect::None`），但這條線現在就接對。
+            let _ = inner.doc.apply(Op::BrushStroke {
+                color: inner.app.color,
+                opacity,
+            });
+            inner.sync_mask();
+        });
     }
 
+    /// palm rejection 事後判定失敗：直接清 `T_wet`，**`T_paint` 從未被污染**。
     pub fn cancel_stroke(&self) {
-        self.mutate(|inner| inner.stroke_active = false);
+        self.mutate(|inner| {
+            discard(inner);
+            inner.sync_mask();
+        });
     }
 
     /// 油漆桶。`x` / `y` 是**螢幕像素**（`E1-bucket §4.1`），乘 `contentsScale`
@@ -234,9 +336,7 @@ impl RustEngine {
                 transform: inner.transform,
                 screen_size: inner.screen_size(),
                 background: CANVAS_BACKGROUND,
-                // 進行中筆畫的顏色。Pass 1 還沒接上時 `T_wet` 恆為空，
-                // 這個值不影響畫面，但先送對的東西省得 E1-stroke 再找一次。
-                brush_color: encode(inner.app.color),
+                brush_color: inner.brush_color(),
             };
             if let Err(e) = inner.render.render(frame) {
                 log_once!("[colorlull] render 失敗（僅報一次）：{e}");
@@ -249,6 +349,20 @@ impl RustEngine {
     /// （`E1-input §5`）。
     pub fn set_viewport(&self, transform: Transform) {
         self.mutate(|inner| inner.transform = transform.into());
+    }
+
+    /// **Debug 專用**：Mask Mode A／B 即時切換（`E1-perf §5` 的 D4）。
+    ///
+    /// 一次 `write_buffer`，不重建 pipeline（`E1-wgpu §7.1`）——所以筆畫進行中切
+    /// 也不會掉 frame，這正是 D4 要的「同一筆兩種模式對照」。
+    ///
+    /// **不做成正式 UI**（`E1-perf §5`）：D4 之後留一個開關在畫面上會被誤觸。
+    /// 決策拍板後這支方法連同 Swift 端的 toggle 一起移除。
+    pub fn set_mask_mode(&self, mode: MaskMode) {
+        self.mutate(|inner| {
+            inner.mask_mode = mode.into();
+            inner.sync_mask();
+        });
     }
 
     pub fn state(&self) -> UiState {
@@ -594,7 +708,79 @@ mod tests {
         engine.end_stroke();
         engine.append_samples(vec![sample]);
 
-        assert!(!engine.lock().stroke_active);
+        assert!(engine.lock().stroke.is_none());
+    }
+
+    fn sample_at(x: f32, y: f32) -> InputSample {
+        InputSample {
+            x,
+            y,
+            t: 0.0,
+            pressure: 0.5,
+            radius: 4.0,
+            tilt_x: 0.0,
+            tilt_y: 0.0,
+            predicted: false,
+        }
+    }
+
+    /// Mode A 遮罩的是**起筆處**的區域（`E1-bucket §4.4`）。
+    #[test]
+    fn a_stroke_takes_its_active_region_from_the_first_sample() {
+        let engine = engine_with_gpu();
+        engine.set_tool(marker(2.0));
+
+        // fixture 的右半是 region 1。transform 是恆等，螢幕像素即畫布像素。
+        engine.begin_stroke(sample_at(3.0, 1.0));
+
+        assert_eq!(engine.lock().stroke.as_ref().map(|s| s.region_id), Some(1));
+    }
+
+    /// 只有筆刷會產生筆畫：橡皮擦是 E2、油漆桶走 `tap`。
+    #[test]
+    fn only_a_brush_starts_a_stroke() {
+        let engine = engine_with_gpu();
+        engine.set_tool(Tool::Bucket {
+            color: Rgba {
+                r: 0,
+                g: 0,
+                b: 0,
+                a: 255,
+            },
+        });
+
+        engine.begin_stroke(sample_at(1.0, 1.0));
+        engine.append_samples(vec![sample_at(2.0, 2.0)]);
+
+        assert!(engine.lock().stroke.is_none());
+    }
+
+    /// composite 第 ④ 層與 Pass 2 必須乘同一個數字，否則筆畫會在抬筆瞬間變深或變淡。
+    #[test]
+    fn the_wet_preview_uses_the_stroke_opacity() {
+        let engine = engine_with_gpu();
+        engine.set_tool(marker(2.0));
+
+        engine.begin_stroke(sample_at(1.0, 1.0));
+        assert_eq!(
+            engine.lock().brush_color()[3],
+            0.6,
+            "marker 的 opacity 覆寫值"
+        );
+
+        engine.end_stroke();
+        // 沒有進行中的筆畫時退回顏色自己的 alpha——那個值不影響任何像素。
+        assert_eq!(engine.lock().brush_color()[3], 1.0);
+    }
+
+    /// D4 的開關（`E1-perf §5`）。真相在 `Inner`，GPU 上的 uniform 是它的投影。
+    #[test]
+    fn mask_mode_round_trips() {
+        let engine = engine_with_gpu();
+        assert_eq!(engine.lock().mask_mode, render::MaskMode::Strict);
+
+        engine.set_mask_mode(MaskMode::Loose);
+        assert_eq!(engine.lock().mask_mode, render::MaskMode::Loose);
     }
 
     #[test]

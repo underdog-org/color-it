@@ -9,8 +9,12 @@
 use std::time::Instant;
 
 use colorpack::ColorPack;
+use stroke::Dab;
 
+use crate::bounds::Bounds;
+use crate::commit::CommitPass;
 use crate::composite::{CompositePass, Frame};
+use crate::dab::StrokePass;
 use crate::erase::ErasePass;
 use crate::error::RenderError;
 use crate::fill::{Fill, FillAnimator, encode};
@@ -45,6 +49,8 @@ pub struct RenderContext {
     mask: Option<MaskBinding>,
     composite: Option<CompositePass>,
     erase: Option<ErasePass>,
+    stroke: Option<StrokePass>,
+    commit: Option<CommitPass>,
     attached: Option<Attached>,
     /// 擴散動畫的 CPU 側（`E1-bucket §7`）。`document` 對它一無所知。
     fill_anim: FillAnimator,
@@ -62,6 +68,8 @@ impl RenderContext {
             mask: None,
             composite: None,
             erase: None,
+            stroke: None,
+            commit: None,
             attached: None,
             fill_anim: FillAnimator::new(),
             last_frame: None,
@@ -89,6 +97,14 @@ impl RenderContext {
 
         let erase = self.erase.get_or_insert_with(|| ErasePass::new(gpu));
         erase.bind_document(gpu, resources);
+
+        let stroke = self.stroke.get_or_insert_with(|| StrokePass::new(gpu));
+        stroke.bind_document(gpu, resources);
+
+        let commit = self
+            .commit
+            .get_or_insert_with(|| CommitPass::new(gpu, mask));
+        commit.bind_document(gpu, resources);
         Ok(())
     }
 
@@ -183,6 +199,59 @@ impl RenderContext {
                 prev: encode(prev),
             },
         );
+    }
+
+    /// Pass 1：把本 frame 新增的 dab 畫進 `T_wet`（`E1-stroke §7`）。
+    ///
+    /// 回傳這一批的包絡，呼叫端據此累積整筆 bbox——Pass 2 要的是整筆的，
+    /// 而 scissor 用的是這一批的，兩者刻意不同。
+    pub fn draw_dabs(&mut self, dabs: &[Dab], build_up: bool) -> Option<Bounds> {
+        let (Some(gpu), Some(res), Some(stroke)) = (
+            self.gpu.as_ref(),
+            self.resources.as_ref(),
+            self.stroke.as_ref(),
+        ) else {
+            return None;
+        };
+        stroke.draw(gpu, res, dabs, build_up);
+        Bounds::of_dabs(dabs)
+    }
+
+    /// Pass 2：抬筆時一次，`T_wet × opacity × mask` → `T_paint`，收尾清 `T_wet`
+    /// （`E1-stroke §8`）。
+    ///
+    /// `color` 是編碼值 straight alpha；整筆濃度由 `opacity` 決定，不看 `color.a`。
+    pub fn commit_stroke(&mut self, color: [f32; 4], opacity: f32, bounds: Bounds) {
+        let (Some(gpu), Some(res), Some(commit), Some(mask)) = (
+            self.gpu.as_ref(),
+            self.resources.as_ref(),
+            self.commit.as_ref(),
+            self.mask.as_ref(),
+        ) else {
+            return;
+        };
+        let Some(bbox) = bounds.to_scissor(res.canvas_size()) else {
+            return;
+        };
+        commit.commit(gpu, res, mask, color, opacity, bbox);
+    }
+
+    /// 丟掉進行中的筆畫：只清 `T_wet`，**`T_paint` 從未被污染**。
+    ///
+    /// `cancel_stroke`（palm rejection 事後判定失敗）與 `end_stroke` 的重建
+    /// （`E1-stroke §9`）走同一支。
+    pub fn discard_wet(&mut self, bounds: Bounds) {
+        let (Some(gpu), Some(res), Some(commit)) = (
+            self.gpu.as_ref(),
+            self.resources.as_ref(),
+            self.commit.as_ref(),
+        ) else {
+            return;
+        };
+        let Some(bbox) = bounds.to_scissor(res.canvas_size()) else {
+            return;
+        };
+        commit.clear_wet(gpu, res, bbox);
     }
 
     /// 還有擴散動畫在跑——FrameDriver 用它決定要不要繼續出 frame（`E1-input`）。

@@ -20,6 +20,19 @@
 - 回寫 `architecture.md` §4.5（`max_radius` 取四角最大距離、曲線與時長）與 §4.7（進度真相在 `document`）、`E1-composite.md §5`、`contracts.md` ②＋新增 C9（座標單位＝螢幕像素）
 - `engine` 的 `tap` 接線仍是 S0 mock，歸 `E1-input`
 
+**Stroke Pass 1／2 與 Mask Mode（E1）**
+- Pass 1 `StrokePass`：instanced quad × dab → `T_wet`，程序生成的軟圓 tip（256×256 R8 array，layer 1／2 留給 E2，未實作的 tip 在 CPU 側 fallback）、`build_up` 兩條預建 pipeline（`Max` vs `OneMinusDst/Add`）、scissor 用**增量** bbox、超過 `MAX_DABS_PER_DRAW` 分批
+- Pass 2 `CommitPass`：`T_wet × opacity × mask` → `T_paint`（premultiplied over），收尾清 `T_wet`，兩步都 scissor 至整筆 bbox；`cancel_stroke` 共用清除路徑
+- `engine` 接線（`brush.rs`）：`deps-policy` 開 `engine → stroke`（`E1-stroke §14` 決議 C 結案）、筆刷 ID → 十四欄參數的對應、`end_stroke` 走「清 → 以真實樣本重建 → commit」丟掉預測點的尾巴、`brush_color` 的 alpha 改用整筆 opacity（否則抬筆瞬間濃度會跳）
+- `set_mask_mode` FFI ＋ `CanvasScreen` 的 `#if DEBUG` toggle（D4 的輸入）；`active_region_id` 取自起筆處的 region。契約新增 C13：它排定要移除，移除不算 major bump
+- 15 條 GPU 測試 ＋ 4 條 engine 接線測試；`T_wet` 沒有 `COPY_SRC`，驗證一律從 `T_paint` 讀回
+- **分批必須各自 submit**：`Queue::write_buffer` 在 submit 時才依序落地，同一次 submit 裡寫兩批會讓第二批蓋掉第一批——「畫太快只剩最後 4096 個 dab」
+
+**量測（E1）**
+- `docs/perf-baseline.md` 第一版：量測條件檢查表、兩台裝置的空表、`§4.1.1` 三步對帳、八項調校初值與出處。**數字全部待實測**
+- `architecture.md §4.1.1` 補 swapchain drawable 與 `region_ids` 兩列（標「待實測」，不拿估算值改預算結論）；§13.1 標明 undo pool 那條在 E1 不適用
+- `E1-perf §7` 調校表新增 `TIP_FALLOFF`——筆尖是程序生成的，衰減曲線因此是個真的參數
+
 **Input／FrameDriver（E1）**
 - `RustEngine` 不再是 S0 mock：`new` 真的解析 `.colorpack`（`total_regions` 與 `region_ids` 都從它來）、`attach_surface` 真的建 device／surface／`DocumentResources`、`render` 走 Pass 3、`tap` 走 `canvas_pos → region_at → document.apply → RenderContext::fill`
 - `EngineError::Surface` 新增——`attach_surface` 從「永遠 `Ok`」變成真的會失敗（`E1-wgpu §2.2`）；資產包壞了與 surface 建不起來，使用者能做的事不同

@@ -19,6 +19,7 @@ colorlull-colorpack = { workspace = true }
 colorlull-document = { workspace = true }
 colorlull-history = { workspace = true }
 colorlull-render = { workspace = true }
+colorlull-stroke = { workspace = true }
 thiserror = { workspace = true }
 uniffi = { workspace = true }
 

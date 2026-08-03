@@ -5,6 +5,7 @@
 //!
 //! 行為表見 `docs/specs/ffi-contract.md §5`。
 
+mod brush;
 mod engine;
 mod error;
 mod ffi;

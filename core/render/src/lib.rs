@@ -2,8 +2,11 @@
 //!
 //! 職責與邊界見 `docs/architecture.md §5.1`，E1 的實作契約見 `docs/specs/E1-wgpu.md`。
 
+mod bounds;
+mod commit;
 mod composite;
 mod context;
+mod dab;
 mod erase;
 mod error;
 mod fill;
@@ -11,8 +14,11 @@ mod gpu;
 mod mask;
 mod resources;
 
+pub use bounds::Bounds;
+pub use commit::CommitPass;
 pub use composite::{CompositePass, Frame, Transform};
 pub use context::{RenderContext, SURFACE_FORMAT, SurfaceHandle};
+pub use dab::{DabInstance, StrokePass, TIP_FALLOFF};
 pub use erase::ErasePass;
 pub use error::RenderError;
 pub use fill::{FILL_ANIM_SIZE, FILL_DURATION, Fill, FillAnim, FillAnimator, ease_out, encode};

@@ -477,6 +477,7 @@ dependencies = [
  "colorlull-document",
  "colorlull-history",
  "colorlull-render",
+ "colorlull-stroke",
  "png",
  "thiserror",
  "uniffi",

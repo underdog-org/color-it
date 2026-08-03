@@ -304,15 +304,15 @@ bbox 大小的暫存層、每 frame 清掉，再與 `T_wet` 一起合成。
 
 ## 12. 驗收
 
-- [ ] `cargo test -p stroke` 在無 GPU 環境全綠（Boundary 2）
-- [ ] **串流／批次等價**：`StrokeBuilder.finish() == generate_dabs(同一組真實樣本)`
+- [x] `cargo test -p stroke` 在無 GPU 環境全綠（Boundary 2）
+- [x] **串流／批次等價**：`StrokeBuilder.finish() == generate_dabs(同一組真實樣本)`
 - [ ] 三條 golden fixture 產生穩定輸出；同 `seed` 兩次執行逐位元相同
 - [ ] 快速轉向的軌跡不 overshoot、不自交打結
-- [ ] 慢速來回塗抹同一處，濃度不隨次數變深（`T_wet` ＋ `Max` blend 的直接驗證）
-- [ ] `opacity` 調整後，整筆濃度上限跟著變，而不是每個 dab 的濃度變
-- [ ] 抬筆後的筆畫尾端與實際抬筆位置相符（§9 的重建生效）
-- [ ] 快速長筆畫（一 frame > 4096 dab）不斷線
-- [ ] `cancel_stroke` 之後 `T_paint` 逐像素不變
+- [x] 慢速來回塗抹同一處，濃度不隨次數變深（`T_wet` ＋ `Max` blend 的直接驗證）
+- [x] `opacity` 調整後，整筆濃度上限跟著變，而不是每個 dab 的濃度變
+- [x] 抬筆後的筆畫尾端與實際抬筆位置相符（§9 的重建生效）
+- [x] 快速長筆畫（一 frame > 4096 dab）不斷線
+- [x] `cancel_stroke` 之後 `T_paint` 逐像素不變
 
 ## 13. 要回寫的既有文件
 
@@ -322,7 +322,7 @@ bbox 大小的暫存層、每 frame 清掉，再與 `T_wet` 一起合成。
 | `architecture.md §5.2` | `generate_dabs` 多一個 `size` 參數（決議 E） | ✅ |
 | `architecture.md §5.3` | 輸入處理鏈補「向心」與「radius 另一組濾波參數」（§4） | ✅ |
 | `architecture.md §10.2` | 自適應正規化補 per-stroke 的已知限制與 `R_EPS`（§5）；baseline 初值是 `r ± R_EPS/2` 的帶狀，不是 `r`（決議 F） | ✅ |
-| `E1-composite.md §3` | `T_paint` 是 premultiplied alpha，第 ③ 層的 `over()` 要對應（§8） | Pass 2 落地時 |
+| `E1-composite.md §3` | `T_paint` 是 premultiplied alpha，第 ③ 層的 `over()` 要對應（§8） | ✅ |
 | `contracts.md` ③ | 補 C9：`radius == 0` 表示觸控筆，`> 0` 表示手指（§2.2） | ✅（`E1-input` 一併補了 C10） |
 | 本文 §9 | 濾波器狀態必須排除 `predicted` 樣本（`E1-input §4`） | ✅ |
 
@@ -336,7 +336,7 @@ bbox 大小的暫存層、每 frame 清掉，再與 `T_wet` 一起合成。
 |---|---|---|
 | A | `app_state::BrushPreset`（五支 enum，＝筆刷 ID）與本文的 `BrushPreset`（十四欄參數 struct）**同名不同物** | 兩個都留。`stroke` 是參數的唯一出處；`stroke` **不依賴 `app-state`**（它是同層 crate，不在 `stroke` 的下游），所以 enum → 參數的對應寫在 `engine` |
 | B | `architecture.md §5.2` 的 `Vec2` 全 workspace 不存在，也沒有數學 crate | 定義在 `stroke::math`。不引 glam：只需要 add/sub/mul/lerp/length |
-| C | `engine` → `stroke` 不在 `deps-policy.toml`，而 §2 把扁平 → `Vec2` 的轉換派給 `engine` | **本段不動 policy**。轉換與 `begin/append/end_stroke` 的接線延到 Pass 1/2 落地時一併做（改 policy ＝ 改架構，要單獨一次） |
+| C | `engine` → `stroke` 不在 `deps-policy.toml`，而 §2 把扁平 → `Vec2` 的轉換派給 `engine` | ✅ **已結案**（2026-08-03，Pass 1／2 落地時單獨一次改完）：`[crates.engine].internal` 加 `stroke`，轉換與接線住 `engine/src/brush.rs` |
 | D | §10「E1 不設為 CI gate」需要一個機制 | 三條 golden 標 `#[ignore]`；`UPDATE_GOLDEN=1 cargo test -p colorlull-stroke --test golden -- --ignored` 重新產生。§2.1 的等價測試與「同 seed 逐位元相同」**不標**，現在就是 gate |
 | E | `spacing` 是筆尖直徑比、`pressure_to_size` 是 0.35–1.0 倍率，但筆刷直徑住在 `AppState.size`，不在 `generate_dabs` 的簽章裡——弧長門檻算不出 px | 加 `size: f32` 參數，`Dab.size` 是 px 直徑。列入 §13 回寫 |
 | F | §5 的 baseline 初值寫「＝第一個樣本的 `r`」，但這樣起筆 `pressure` 恆為 0，與同段「此時應為中值」矛盾 | 公式不動，**初值改成 `r_min = r₀ - R_EPS/2`、`r_max = r₀ + R_EPS/2`**。起筆得 0.5，且 min/max 照樣單調外擴 |

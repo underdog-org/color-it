@@ -114,6 +114,10 @@ latency = (f_paint - f_touch) / 240 × 1000 ms
 （一次 `write_buffer`，不重建 pipeline——`E1-wgpu §7.1`）。不做成正式 UI，
 D4 之後留一個會被誤觸。
 
+> **已落地**（2026-08-03）：`Engine::set_mask_mode` → `CanvasScreen` 的
+> `MaskModeToggle`（`#if DEBUG` 限定）。契約 C13 已記明它排定要移除，
+> 移除**不算 major bump**。`active_region_id` 取自**起筆處**的 region。
+
 **比較劇本**（同一位受試者兩種都試，順序隨機）：
 
 1. 填一個區域後**故意畫出界**——A 擋住，B 塗到隔壁
@@ -154,6 +158,7 @@ D4 之後留一個會被誤觸。
 | One-Euro 位置 `min_cutoff`／`beta`／`d_cutoff` | 1.0／0.05／1.0 | `E1-stroke §4.1` | 慢速直線不抖，快速轉向不拖尾 |
 | One-Euro radius 同上三項 | 0.5／0.0／1.0 | `E1-stroke §4.1` | 定點加壓時筆寬平順，不跳 |
 | `R_EPS` | 4.0 點 | `E1-stroke §5` | 起筆瞬間的筆寬不是最細或最粗 |
+| `TIP_FALLOFF` | 1.0（線性） | `E1-stroke §6.1` | 筆跡邊緣的軟硬。太硬像貼圖、太軟像噴槍 |
 | `FILL_EDGE` | 24 px | `E1-composite §5` | 前緣柔和但看得出是擴散 |
 | 動畫時長 | 180 ms ease-out | `E1-bucket §7.3` | 感覺得到但不必等 |
 | `maximumDrawableCount` | 2 | `E1-wgpu §3.1` | §2 的 latency 中位數 |

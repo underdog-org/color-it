@@ -31,6 +31,31 @@ struct CanvasScreen: View {
         .padding()
         .navigationTitle(assetID)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar { MaskModeToggle(engine: engine) }
+    }
+}
+
+/// D4 的比較開關（`docs/specs/E1-perf.md §5`）。**Debug 建置限定**——
+/// Release 裡整個 toolbar item 不存在，不是 disabled。
+///
+/// `mask mode` 不在 `UiState` 裡（切它不改任何業務狀態），所以真相在這個
+/// `@State` 與 Rust 的 `Inner` 各一份。**Shell 這份只是 toggle 的位置**，
+/// 畫面上的實際遮罩永遠以 Rust 那份為準——D4 之後兩份一起刪掉。
+private struct MaskModeToggle: ToolbarContent {
+    let engine: any EngineProtocol
+
+    @State private var strict = true
+
+    var body: some ToolbarContent {
+        ToolbarItem(placement: .topBarTrailing) {
+            #if DEBUG
+                Toggle("Mask A", isOn: $strict)
+                    .toggleStyle(.button)
+                    .onChange(of: strict) { _, isStrict in
+                        engine.setMaskMode(isStrict ? .strict : .loose)
+                    }
+            #endif
+        }
     }
 }
 

@@ -30,12 +30,15 @@ S0 驗收「`EngineProtocol.swift` 與 Rust FFI 表面逐一對照無缺漏」�
 | `detach_surface()` | — | `engine.rs` | **只丟 surface**，device 與文件資源留著（C5） |
 | `set_tool(tool)` | — | `ffi.rs` → `app-state` | 真的寫進 `AppState`，emit |
 | `pick_color(x, y)` | — | `engine.rs` | 回傳 `AppState.color`，座標忽略（見 C6） |
-| `begin_stroke(s)` / `end_stroke()` / `cancel_stroke()` | — | `engine.rs` | 只維護 `Inner::stroke_active`，樣本丟棄 |
-| `append_samples(s)` | — | `engine.rs` | 樣本丟棄；不 emit（stroke 狀態不在 `UiState` 裡） |
+| `begin_stroke(s)` | — | `engine.rs` → `stroke` / `render` | 起 `StrokeBuilder`、取起筆處的 `active_region_id`、Pass 1 畫第一個 dab。**非筆刷工具時什麼都不做** |
+| `end_stroke()` | — | `engine.rs` → `render` / `document` | 重建 `T_wet`（丟掉預測點）→ Pass 2 commit → `document.apply(Op::BrushStroke)`（E1 回 `Effect::None`） |
+| `cancel_stroke()` | — | `engine.rs` → `render` | 只清 `T_wet`，**`T_paint` 從未被污染** |
+| `append_samples(s)` | — | `engine.rs` → `stroke` / `render` | 真實樣本進 builder、預測點走 `predicted_dabs`（不污染濾波器狀態）；兩者都畫進 `T_wet`。不 emit（stroke 狀態不在 `UiState` 裡） |
 | `tap(x, y)` | — | `engine.rs` → `document` | `Transform::canvas_pos` → `region_at` → `document.apply(Op::Fill)` → `RenderContext::fill`；`colored_regions` 由 `document` 投影。畫布外與同色重填都落空。**未 attach 時 no-op**——`region_ids` 住在 `DocumentResources` |
 | `undo()` / `redo()` | — | `engine.rs` | no-op ＋ 一次性 log（E3） |
 | `render()` | — | `engine.rs` → `render` | 推進擴散動畫 ＋ Pass 3 Composite。infallible：掉 frame 與取不到 drawable 都不是錯誤。無 surface 時什麼都不做 |
 | `set_viewport(transform)` | — | `engine.rs` | 覆寫 `Inner::transform`。E1 的 transform 由 attach／resize 自算 fit-to-screen，這支是 E2 縮放平移的入口 |
+| `set_mask_mode(mode)` | — | `engine.rs` → `render` | **Debug 專用**，D4 的 A／B 比較（`specs/E1-perf.md §5`）。一次 `write_buffer`，不重建 pipeline，筆畫進行中切也不掉 frame。不 emit。**決策拍板後與 Swift 端的 toggle 一起移除** |
 | `state()` | — | `ffi.rs` | `From<&AppState> for UiState` 投影 |
 | `set_state_listener(opt)` | — | `engine.rs` | 單一 listener，後設覆蓋前設；`None` 是 detach 路徑 |
 | `save()` | ✅ | `engine.rs` | `Err(NotImplemented { milestone: "E3" })` |
@@ -78,6 +81,7 @@ Swift 端不會想每 frame `try`。表上沒有 `makeCanvasView()`，那是 Bri
 | C10 | `InputSample.radius == 0` 表示**觸控筆**、`> 0` 表示手指（`specs/E1-stroke.md §2.2`）。Pencil 的 `majorRadius` 也有值，所以那個 0 是 Bridge **主動寫入的語意**，不是缺值 |
 | C11 | `InputSample.t` 相對**筆畫起點**歸零，單位秒。`UITouch.timestamp` 是 `systemUptime`，直接送 `f32` 只剩 0.03 秒解析度，One-Euro 的 `dt` 會爛掉（`specs/E1-input.md §4.1`） |
 | C12 | `InputSample.radius` 的單位是**點**，不是螢幕像素——這是 C9 的記名例外。`R_EPS = 4.0`（點）是絕對量，換單位不會被自適應正規化約掉（`specs/E1-stroke.md §5`） |
+| C13 | `set_mask_mode` 是**排定要移除的方法**，不是 v0 表面的一部分——Shell 不得依賴它。D4 拍板寫回 `prd.md §4.1` 之後，移除它**不算 major bump** |
 
 C8 的兩個後果，Bridge 必須知道：
 

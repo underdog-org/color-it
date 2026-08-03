@@ -175,6 +175,16 @@ public final class MockEngine: EngineProtocol {
     public func render() {}
     public func setViewport(_ transform: Transform) {}
 
+    // MARK: Debug
+
+    /// Mock 沒有遮罩可切。記下來只為了讓差分測試看得出「兩邊都不 emit」——
+    /// mask mode 不在 `UiState` 裡，切它不該產生任何狀態回呼。
+    public private(set) var maskMode: MaskMode = .strict
+
+    public func setMaskMode(_ mode: MaskMode) {
+        mutate { $0.maskMode = mode }
+    }
+
     // MARK: 持久化與匯出
     //
     // 三個都丟同一種錯，`milestone` 與 Rust 端一致——Shell 顯示排程時兩個實作不能有落差。

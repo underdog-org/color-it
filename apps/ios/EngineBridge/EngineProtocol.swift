@@ -65,6 +65,14 @@ public protocol EngineProtocol: AnyObject {
     func render()
     func setViewport(_ transform: Transform)
 
+    // MARK: Debug（D4 拍板後整組移除）
+
+    /// Mask Mode A／B 即時切換（`docs/specs/E1-perf.md §5`）。
+    ///
+    /// **不是正式 UI**：D4 之後留一個開關在畫面上會被誤觸，所以它只出現在 Debug
+    /// 建置的選單裡。決策寫回 `prd.md §4.1` 之後，這支方法與兩個實作一起刪掉。
+    func setMaskMode(_ mode: MaskMode)
+
     // MARK: 持久化與匯出（v0 全數丟 `EngineError.NotImplemented`）
 
     func save() throws

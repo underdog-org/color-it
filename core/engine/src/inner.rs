@@ -9,8 +9,9 @@ use std::sync::Arc;
 use app_state::AppState;
 use colorpack::ColorPack;
 use document::Document;
-use render::{RenderContext, Transform as RenderTransform};
+use render::{MaskMode, MaskUniform, RenderContext, Transform as RenderTransform, encode};
 
+use crate::brush::ActiveStroke;
 use crate::ffi::{SurfaceHandle, Transform, UiState};
 use crate::listener::StateListener;
 
@@ -32,7 +33,13 @@ pub(crate) struct Inner {
     /// `set_viewport` 送進來的那一份。**Swift 端不另存**（`E1-input §5`）。
     pub transform: RenderTransform,
     /// stroke 狀態機只活在這裡，**不在 `UiState`**——所以 `append_samples` 不會 emit。
-    pub stroke_active: bool,
+    /// `Some` 即「有一筆正在進行」，不另留一個 bool（兩份真相會不同步）。
+    pub stroke: Option<ActiveStroke>,
+    /// jitter 的 seed 來源。**遞增而非亂數**：E3 的縮時重播要能重現原作，
+    /// 而重播的前提是同一筆拿到同一個 seed。
+    pub stroke_seq: u32,
+    /// D4 的比較開關（`E1-perf §5`）。真相在這裡，GPU 上的 mask uniform 是它的投影。
+    pub mask_mode: MaskMode,
     pub last_emitted: Option<UiState>,
 }
 
@@ -58,7 +65,11 @@ impl Inner {
                 tx: 0.0,
                 ty: 0.0,
             },
-            stroke_active: false,
+            stroke: None,
+            stroke_seq: 0,
+            // 起始是嚴格模式：E1 的產品預設是「受區域約束的塗抹」，
+            // 寬鬆模式是 D4 拿來對照的那一邊（`prd.md §3`）。
+            mask_mode: MaskMode::Strict,
             last_emitted,
         }
     }
@@ -67,6 +78,28 @@ impl Inner {
     /// 提早回傳，這個值不會被用到。
     pub(crate) fn screen_size(&self) -> [u32; 2] {
         self.surface.map_or([0, 0], |s| [s.width_px, s.height_px])
+    }
+
+    /// 把 mask 的真相推到 GPU。一次 `write_buffer`，不重建 pipeline（`E1-wgpu §7.1`）。
+    ///
+    /// `active_region_id` 是**起筆處**的 region（`E1-bucket §4.4`），沒有進行中的
+    /// 筆畫時給 0——那個值在 `T_wet` 為空時不影響任何像素。
+    pub(crate) fn sync_mask(&self) {
+        self.render.set_mask(MaskUniform {
+            mode: self.mask_mode as u32,
+            active_region_id: self.stroke.as_ref().map_or(0, |s| s.region_id),
+        });
+    }
+
+    /// composite 第 ④ 層的顏色（`E1-composite §3`）。
+    ///
+    /// 進行中的筆畫用**整筆 opacity 當 alpha**，不是顏色自己的 alpha：Pass 2 commit
+    /// 乘的是 `opacity`，兩邊不一致的話筆畫會在抬筆瞬間變深或變淡。
+    pub(crate) fn brush_color(&self) -> [f32; 4] {
+        match self.stroke.as_ref() {
+            Some(s) => [s.color[0], s.color[1], s.color[2], s.opacity],
+            None => encode(self.app.color),
+        }
     }
 
     /// 重算 fit-to-screen 的 transform。**E1 沒有縮放平移**（`E1-composite §4`），

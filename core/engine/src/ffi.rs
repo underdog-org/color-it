@@ -146,6 +146,26 @@ impl From<&AppState> for Tool {
     }
 }
 
+/// 遮罩模式（`E1-wgpu §7.1`）。**Debug 專用**，D4 拍板後與 `set_mask_mode`
+/// 一起移除（`E1-perf §5`）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum MaskMode {
+    /// A：只塗得進起筆處的那個區域。
+    Strict,
+    /// B：無條件通過。**不是** `id != REGION_LINEART`——baker 的 ID map 是滿的，
+    /// 沒有保留 ID（`E1-composite §6`）。
+    Loose,
+}
+
+impl From<MaskMode> for render::MaskMode {
+    fn from(v: MaskMode) -> Self {
+        match v {
+            MaskMode::Strict => Self::Strict,
+            MaskMode::Loose => Self::Loose,
+        }
+    }
+}
+
 /// 畫布操作只有縮放平移；加 rotation 是 major bump。
 #[derive(Debug, Clone, Copy, PartialEq, uniffi::Record)]
 pub struct Transform {

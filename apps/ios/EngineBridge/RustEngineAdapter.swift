@@ -153,6 +153,14 @@ public final class RustEngineAdapter: EngineProtocol {
         engine.setViewport(transform: transform)
     }
 
+    // MARK: Debug
+
+    /// 一次 `write_buffer`，不重建 pipeline（`E1-wgpu §7.1`）——所以筆畫進行中切
+    /// 也不會掉 frame，這正是 D4 要的「同一筆兩種模式對照」。
+    public func setMaskMode(_ mode: MaskMode) {
+        engine.setMaskMode(mode: mode)
+    }
+
     // MARK: 持久化與匯出
 
     public func save() throws { try engine.save() }
