@@ -1186,7 +1186,13 @@ thumb.jpg
 3. **可獨立除錯**——UI 出問題時能用 Mock 排除引擎因素
 
 ```swift
-protocol EngineProtocol {
+protocol EngineProtocol: AnyObject {
+    var state: UiState { get }                                  // @Observable，不是 AnyPublisher
+
+    func attachSurface(_ handle: SurfaceHandle) throws
+    func resizeSurface(widthPx: UInt32, heightPx: UInt32, scale: Float)
+    func detachSurface()
+
     func setTool(_ tool: Tool)
     func pickColor(x: Float, y: Float) -> Rgba
     func beginStroke(_ s: InputSample)
@@ -1197,11 +1203,11 @@ protocol EngineProtocol {
     func undo(); func redo()
     func render()
     func setViewport(_ transform: Transform)
-    var state: AnyPublisher<UiState, Never> { get }
-    func makeCanvasView() -> UIView
     func save() throws
-    func exportPNG() -> Data
-    func exportTimelapse() -> Data
+    func exportPNG() throws -> Data
+    func exportTimelapse() throws -> Data
+
+    func makeCanvasView() -> UIView                             // C7，不在 FFI
 }
 
 final class MockEngine: EngineProtocol {
@@ -1211,11 +1217,13 @@ final class MockEngine: EngineProtocol {
 }
 ```
 
-App Shell 只依賴 `EngineProtocol`。引擎完成後把 `MockEngine` 換成 `RustEngine`，Shell 一行不改。
+`state` 用 `@Observable` 而非 `AnyPublisher`——後者是 Combine 時代的寫法。Shell 因此連 `import Combine` 都不需要，view 經 `any EngineProtocol` 存取仍能觸發 observation tracking。
+
+App Shell 只依賴 `EngineProtocol`。引擎完成後把 `MockEngine` 換成 `RustEngine`，Shell 一行不改。實作見 `specs/ios-scaffold.md`；選哪個實作由 `EngineFactory` 決定，Shell 連 `RustEngineAdapter` 這個名字都不會出現（`cargo xtask lint-ios` 守）。
 
 **這份 protocol 必須與 §6 Boundary 1 的 FFI 表面逐項對應。** 少一個方法，就代表 Shell 到 S1 末期切換 `RustEngine` 時得改動——那正是 `roadmap/S0.md`「Mock → RustEngine 時 Shell 端零修改」這條驗收要擋掉的事。FFI 增刪方法時，同步改這裡。
 
-> **⚠ 上面這段 protocol 尚未跟上 §6 的 S0 修正**（`attach_surface` / `detach_surface` / `resize_surface` 缺席、`state` 的來源改成 `set_state_listener`、`exportPNG` / `exportTimelapse` 現在 fallible）。對齊由 iOS 那份 spec 負責，對照基準是 `docs/contracts.md` ②。`makeCanvasView()` 只存在於 Swift 側，不是 FFI 缺漏（C7）。
+三個記名的例外（不算缺漏，理由見 `docs/contracts.md` ②）：`new(pack_path, doc_path)` 是建構、`set_state_listener` 是實作 `state` 的手段、`makeCanvasView()` 屬 Bridge（C7）。
 
 ### 10.2 InputAdapter
 
@@ -1256,6 +1264,8 @@ App Shell 只依賴 `EngineProtocol`。引擎完成後把 `MockEngine` 換成 `R
 | 高更新率 | ProMotion，需設定 `preferredFrameRateRange` | 需查詢並設定 display mode |
 
 渲染由 FrameDriver 驅動，**不由輸入事件驅動**。輸入事件只累積 sample，`render()` 每 frame 呼叫一次。
+
+> **E1 待決項：`MTKView` vs `CADisplayLink` ＋ `CAMetalLayer`。** `MTKView` 自帶一套 draw loop，與上一段「由 FrameDriver 驅動」是競爭機制。S0 的 `EngineCanvasView` 先用 `CAMetalLayer`（`§10.1` 提到的 `MTKView` 因此**尚未**採用），但這個取捨該由 E1 拿著真的 render pass 決定，不預先綁死。
 
 ---
 

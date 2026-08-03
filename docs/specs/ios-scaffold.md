@@ -10,6 +10,8 @@
 
 環境基準：Xcode 26.6、iOS SDK 26.5、uniffi 0.29.5。
 
+> **已實作。** 與本規格的七處偏離記在第 11 節，都是照原文做會卡住的地方。
+
 ## 1. 兩個文件裡的警告已經不成立
 
 接手前先消掉這兩條，否則會照著解決不存在的問題：
@@ -227,6 +229,43 @@ surface 生命週期先跑通。
 | `docs/README.md` | 文件地圖加一列本規格 |
 | `CLAUDE.md` | 「當前」推進 |
 | `CHANGELOG.md` | 本里程碑條目 |
+
+## 11. 實作時與本規格的偏離
+
+實作後回填。每條都是照規格原文做會卡住的地方。
+
+**① 引擎選擇搬進 `EngineBridge.EngineFactory`，不在 `ColorApp.swift`（改 §6）。**
+`§9` 的 `lint-ios` 是純文字檢查，而 `RustEngineAdapter` 字面上就含有 `RustEngine`——
+Shell 只要寫得出這個型別名，`§6` 與 `§9` 就不可能同時成立。把 switch 收進 Bridge 之後
+兩邊都成立：lint 保持最笨最嚴格的形式，Shell 連「有一個 Rust 實作」都不需要知道。
+
+**② scheme 必須是 shared（§2 未提）。** `§9` 的 `xcodebuild -scheme ColorApp` 讀不到
+`xcuserdata/` 裡的 scheme，而 `§2` 要求 gitignore `xcuserdata/`。
+`ColorApp.xcodeproj/xcshareddata/xcschemes/ColorApp.xcscheme` 因此是手工維護且進 git 的。
+
+**③ `EngineBridge` target 必須設 `SWIFT_DEFAULT_ACTOR_ISOLATION = nonisolated`。**
+Xcode 26 模板預設 `MainActor`，而生成的 `colorlull_engine.swift` 是為 nonisolated 寫的
+（`RustEngine` 是 `@unchecked Sendable`、`StateListener` 是 `Sendable`）。Shell 維持 `MainActor`。
+
+**④ `EXCLUDED_ARCHS[sdk=iphonesimulator*] = x86_64`。** xcframework 只有兩片 arm64
+（`xtask/src/ios.rs` 的 `IOS_TARGETS`），而 `-destination generic/platform=iOS Simulator`
+預設連 x86_64 一起編，link 時整批 `.o` 被 ignore、符號全部找不到。
+
+**⑤ `ENABLE_USER_SCRIPT_SANDBOXING = NO`，且 §2 的守門腳本只擋得住一半。**
+腳本要 stat 專案目錄下的 `Generated/`，沙箱會擋掉。更重要的是：**xcframework 的參照在
+build phase 之前就解析**，所以「整個 `Generated/` 不存在」時是 Xcode 自己的錯誤先出現
+（訊息會指名缺哪個路徑，可接受），守門腳本只在「xcframework 在、`Sources/` 不在」時才輪得到。
+兩種都會失敗，只是訊息品質不同——已記在 `apps/ios/README.md`。
+
+**⑥ `MockEngine` 鏡射 `AppState`，不存 `Tool` enum（補 §5）。**
+`pickColor` 要回傳跨工具共用的顏色，而 `Tool.eraser` 沒有顏色欄位。初始值也必須逐欄位
+等於 `AppState::default()`（`#1A1A1A`、size 24、opacity `nil`）——`§8` 的差分測試
+比對整串 `UiState`，包含第一個。`§5` 只寫了 tool 與 progress。
+
+**⑦ bundle id 為 `underdog-ai.colorlull`**（模板是 `underdog-ai.ios`），
+且模板帶的 macOS／visionOS 設定（`SUPPORTED_PLATFORMS` 含 `macosx xros`、
+`ENABLE_APP_SANDBOX`、device family `1,2,7`）全部收掉——v1 只有 iOS。
+CI 加 `CODE_SIGNING_ALLOWED=NO`：專案寫死 `DEVELOPMENT_TEAM` ＋ 自動簽章，runner 沒有憑證。
 
 ## 不做
 

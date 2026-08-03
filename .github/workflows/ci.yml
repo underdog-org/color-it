@@ -57,6 +57,11 @@ jobs:
       - name: lint-deps
         run: cargo xtask lint-deps
 
+      # 驗收「App Shell 端沒有任何一行直接引用 RustEngine」的機械化版本。
+      # 純文字檢查，不需要 Xcode，所以跑在 Linux 上零成本。
+      - name: lint-ios
+        run: cargo xtask lint-ios
+
       - name: verify-generated
         run: cargo xtask verify-generated
 
@@ -103,7 +108,14 @@ jobs:
       - name: ios
         run: cargo xtask ios
 
-      # xtask ios 會回寫 ffi-lock.toml。這裡有 diff 代表 commit 時忘了帶上它，
-      # 或 macOS 與 Linux 的 bindgen 產物不一致——兩種都必須當場知道。
       - name: ffi-lock.toml 應保持乾淨
         run: git diff --exit-code core/engine/ffi-lock.toml
+
+      - name: xcodebuild build-for-testing
+        working-directory: apps/ios
+        run: |
+          xcodebuild build-for-testing \
+            -project ColorApp.xcodeproj \
+            -scheme ColorApp \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO

@@ -1,6 +1,7 @@
 //! Colorlull 的建置協調。指令清單見 `docs/architecture.md §12.1`。
 
 mod ios;
+mod lint_ios;
 mod metadata;
 mod policy;
 mod torture;
@@ -23,6 +24,8 @@ struct Cli {
 enum Command {
     /// 檢查 crate 依賴是否符合 xtask/deps-policy.toml
     LintDeps,
+    /// 檢查 App Shell 沒有直接引用 RustEngine（跑在 Linux，不需要 Xcode）
+    LintIos,
     /// 決定性產生 torture test 素材 → assets/source/torture-01/
     GenTorture,
     /// 執行 baker
@@ -39,6 +42,7 @@ enum Command {
 fn main() -> Result<()> {
     match Cli::parse().command {
         Command::LintDeps => lint_deps(),
+        Command::LintIos => lint_ios::run(&metadata::load()?.root),
         Command::GenTorture => torture::run(&metadata::load()?.root),
         Command::Bake { .. } => {
             bail!("cargo xtask bake 尚未實作（M1）。流程見 docs/architecture.md §9.2")

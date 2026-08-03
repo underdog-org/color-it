@@ -45,6 +45,16 @@ S0 驗收「`EngineProtocol.swift` 與 Rust FFI 表面逐一對照無缺漏」�
 fallible 的界線是契約的一部分，不因 S0 是 mock 而挪動——`render()` 每 frame 呼叫，
 Swift 端不會想每 frame `try`。表上沒有 `makeCanvasView()`，那是 Bridge 的東西（見 C7）。
 
+**Swift 對應**：上表除三項外全部一對一出現在 `apps/ios/EngineBridge/EngineProtocol.swift`
+（名稱照 uniffi 的 camelCase，`export_png` → `exportPNG`）。三個記名的例外——
+驗收「逐一對照無缺漏」會把它們誤判成缺漏，所以記在這裡：
+
+| FFI | Swift 對應 |
+|---|---|
+| `new(pack_path, doc_path)` | `RustEngineAdapter.init(packPath:docPath:)`。建構不是抽象的一部分——`MockEngine()` 沒有 pack |
+| `set_state_listener(opt)` | 無。它是**實作 `state` 的手段**，不是 Shell 的介面；Shell 要的是「狀態會自己更新」 |
+| 無 | `makeCanvasView()`。反向：Bridge 有、FFI 沒有（C7） |
+
 **生成的 Swift 名字**：`RustEngine`（class）＋ `RustEngineProtocol`（uniffi 自動生的）。
 後者與手寫的 `EngineProtocol.swift` 是**兩個不同的東西**，前者簽章跟著 Rust 走、
 後者是 Shell 依賴的抽象。Rust 端的 Object 不可改名回 `Engine`——那會與手寫的

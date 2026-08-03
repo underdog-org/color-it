@@ -7,4 +7,10 @@
 /apps/ios/Generated/
 /apps/android/generated/
 
+# Xcode 的個人狀態，不是專案設定（specs/ios-scaffold.md §2）。
+# `UserInterfaceState.xcuserstate` 每次開關 Xcode 都會變，scheme 管理則是個人偏好。
+# 要進 git 的 scheme 一律放 `xcshareddata/xcschemes/`——CI 的 `-scheme` 只讀得到那裡。
+xcuserdata/
+DerivedData/
+
 .DS_Store

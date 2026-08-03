@@ -90,6 +90,7 @@ M0 驗收「刻意在 `stroke` 加 wgpu 依賴時 lint 會失敗」**做成 xtas
 | 指令 | 狀態 |
 |---|---|
 | `lint-deps` | M0 實作（alias 定義在 `.cargo/config.toml`） |
+| `lint-ios` | **S0 實作**。純文字檢查 `apps/ios/ColorApp/**` 不得出現 `RustEngine`、不得 `import colorlull_engine`。把驗收「App Shell 沒有一行直接引用 `RustEngine`」從目視變成機械檢查，跑在 Linux 上零成本 |
 | `gen-torture` | M0 實作。決定性產生 `assets/source/torture-01/`，重跑逐位元相同（否則 LFS 每跑一次胖一份） |
 | `bake <dir>` | 指令位，body 回傳「M1 實作」錯誤訊息 |
 | `ios` | **S0 實作**。host cdylib 生 Swift binding ＋ 兩個 iOS `.a` 打包 `.xcframework`，重算 `core/engine/ffi-lock.toml` |
@@ -104,7 +105,10 @@ M0 驗收「刻意在 `stroke` 加 wgpu 依賴時 lint 會失敗」**做成 xtas
 
 - 觸發於 `push`（`main`）與 `pull_request`
 - `runs-on: ubuntu-latest`，checkout `lfs: false`，`Swatinem/rust-cache`
-- steps：`fmt --check` → `clippy -D warnings` → `xtask lint-deps` → `test --workspace` → `build --workspace`
+- steps：`fmt --check` → `clippy -D warnings` → `xtask lint-deps` → `xtask lint-ios` → `xtask verify-generated` → `test --workspace` → `build --workspace`
+- macOS job（paths-filter 節流）：`xtask ios` → `ffi-lock.toml` 應無 diff → `xcodebuild build-for-testing`。
+  **不 boot 模擬器**——花編譯時間、不花啟動時間，就能守住 modulemap／link／protocol 對齊這三類
+  只有 Swift 編譯器抓得到的錯。測試本身在本機跑
 
 觸發路徑除了 §12.3 的 `core/**`、`tools/baker/**`、`contracts/**`，
 **再加 `xtask/**`、`Cargo.toml`、`Cargo.lock` 與 workflow 檔自身**——

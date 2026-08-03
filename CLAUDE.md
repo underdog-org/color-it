@@ -3,7 +3,8 @@
 iOS 著色 App。核心是「**受區域約束的塗抹**」——不是繪圖軟體。
 單人開發，v1 只有 iOS，38 週零 buffer。
 
-**當前**：S0 契約定義（W4，見 `docs/roadmap/S0.md`）。Rust 側已落地——`core/engine` 是 headless mock，FFI 表面與語意條款記在 `docs/contracts.md`；iOS 骨架（Xcode 專案、`EngineProtocol` / `MockEngine`、五條路由）未開工。
+**當前**：S0 契約定義收尾（W4，見 `docs/roadmap/S0.md`）。Rust 側與 iOS 骨架都已落地——`core/engine` 是 headless mock（FFI 表面與語意條款記在 `docs/contracts.md`），`apps/ios/ColorApp.xcodeproj` 有三個 target ＋ 五條路由，`EngineBridgeTests` 八條全綠（含 Mock↔Rust 差分測試）。**剩三條驗收要在模擬器上人工走一遍**（靜態圖畫布、tap→progress、五條路由導航）。
+> 開 Xcode 前先跑 `cargo xtask ios`——`apps/ios/Generated/` 是 gitignore 的產物（`apps/ios/README.md`）。
 **M0 未結的兩件事**：`adventure-time-demo-1/flats.png` 待重做、繪師徵才 JD 待發。
 
 > 產品原名 `Color It`，2026-08-03 因商標衝突改名 **Colorlull**（`docs/specs/naming.md`）。
@@ -50,7 +51,8 @@ v1 不做但已知想做：Android、深色模式、Pencil 進階、iPad 佈局
 
 ## 慣例
 
-mise 管工具鏈｜建置一律走 `cargo xtask`｜commit `type(scope): subject`｜里程碑推進時更新本檔「當前」
+mise 管工具鏈｜建置一律走 `cargo xtask`｜commit `type(scope): subject`｜里程碑推進時更新本檔「當前」｜
+Xcode 的 `xcuserdata/` 不進 git，要進 git 的 scheme 放 `xcshareddata/xcschemes/`
 
 ## 常查
 

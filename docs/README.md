@@ -15,6 +15,7 @@
 | [specs/build-infra.md](./specs/build-infra.md) | workspace 佈局、依賴 lint 規則、CI 形狀（M0 基建） | 短 |
 | [specs/naming.md](./specs/naming.md) | 產品名稱決策記錄（為何不叫 Color It）＋ 上架前必補的查證項 | 短 |
 | [specs/ffi-contract.md](./specs/ffi-contract.md) | uniffi 型別與方法表、headless mock、`xtask ios`（S0 Rust 契約**設計**） | 509 行 |
+| [specs/ios-scaffold.md](./specs/ios-scaffold.md) | Xcode 專案佈局、`EngineProtocol` / `MockEngine` / `RustEngineAdapter`、五條路由、Swift 測試與 CI gate（S0 iOS 側） | 短 |
 | [contracts.md](./contracts.md) | FFI 的**現況**：表面速查表、語意條款 C1–C8、semver 判定、遷移記錄 | 102 行 |
 
 `roadmap/` 已全部拆檔，一次只讀需要的那一份。
@@ -53,6 +54,7 @@
 | 動 workspace 骨架、依賴 lint、xtask 指令 | `specs/build-infra.md` |
 | 產品叫什麼、名稱還有哪些沒查 | `specs/naming.md` |
 | 動 FFI 型別／方法簽章、uniffi 生成、`ffi-lock.toml` | `specs/ffi-contract.md` ★ |
+| 動 Xcode 專案、`EngineBridge`、五條路由、Swift 測試 | `specs/ios-scaffold.md` ＋ `apps/ios/README.md` |
 | 某方法現在到底做了什麼、Swift Bridge 能假設什麼 | `contracts.md` ② ③ ★ |
 | FFI 改動算 major 還是 minor、遷移怎麼記 | `contracts.md` ④ ⑤ |
 | 效能目標、量測 | `§13` 效能觀測 |

@@ -439,6 +439,12 @@ apps/ios/Generated/               ← gitignore（既有規則已涵蓋）
 兩件事的共同點：**`cargo xtask ios` 都會 exit 0**，錯誤只在 Swift 端才浮現，
 而 CI 的 macOS gate 只建 xcframework、不編 Swift。所以兩件都必須寫下來。
 
+> **兩件都已消解，且不再只靠紀律。** S0 的 iOS 骨架已把 xcframework 在 Xcode 裡連起來
+> 並跑過測試（`EngineBridgeTests` 的第 1 條就是這件事的證明），CI 的 macOS job 也接了
+> `xcodebuild build-for-testing`——modulemap 對不上或 protocol 撞名現在會**當場**失敗，
+> 不再是「exit 0 但編不起來」。第 2 點的實際結果：手寫的 `EngineProtocol` 這個名字是空的，
+> uniffi 生的叫 `RustEngineProtocol`，兩者從未衝突。
+
 **1. `SwiftBindingsOptions::xcframework` 必須是 `false`。**
 
 那個旗標唯一的作用是在 modulemap 前面加上 `framework` 關鍵字，而 `framework module`
