@@ -7,6 +7,10 @@
 - `T_region` 上傳 round-trip 逐值相等（`E1-wgpu` 驗收第 4 條）；detach 後 `T_paint` 內容不變（第 3 條）；`T_shade` 缺席綁 1×1 白 dummy（第 5 條）
 - `E1-wgpu.md` §4：`T_line`／`T_shade`／`T_region` 一律加 `COPY_SRC`（唯一能驗證上傳內容的機制）；§3.1 補 wgpu 30 的 `color_space: Auto`
 - 開發機確認拿得到 Metal adapter，`render` 的測試真的在 GPU 上跑；CI runner 待驗
+- Pass 3 Composite 落地：WGSL 六層、`PAPER_WHITE`、full-screen triangle ＋ `Transform` 反變換、擴散動畫的 `Buf_fill`（32 bytes／區，含 `prev_color`）、Mask A／B 切換不重建 pipeline
+- 8 條 offscreen 比對測試，涵蓋 `E1-composite` 驗收五條；`thumb.jpg` 逐像素比對卡在 M0 沒有 `.colorpack`，先以「直接驗 `thumb.rs` 的整數算術」頂替（不降採樣、不過 JPEG，更嚴格）
+- **修正 spec**：`T_line`／`T_shade` 以畫布 UV 取樣而非螢幕 UV（letterbox 時才會顯形，已用左右異色線稿釘住）
+- 回寫 `architecture.md`：§4.2 `erased` 的套用位置＋色彩空間、§4.4 Mode B 改為無條件通過（`REGION_LINEART` 不存在）、§4.5 擴散動畫補 `prev_color`
 
 - 繪師交付改為「線稿＋色標圖」，刪除 flats/reference，區域改由線稿封閉區 flood fill 推導；`.colorpack` 與 App 端零改動。Phase 0 需先驗證線稿封閉性，否決則退回「保留 flats ＋ baker 端量化 snap」
 

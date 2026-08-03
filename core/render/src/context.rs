@@ -8,8 +8,10 @@
 
 use colorpack::ColorPack;
 
+use crate::composite::{CompositePass, Frame};
 use crate::error::RenderError;
 use crate::gpu::{Gpu, instance_descriptor};
+use crate::mask::{MaskBinding, MaskUniform};
 use crate::resources::DocumentResources;
 
 /// Swift 端交出的唯一一個指標（`core/engine/src/ffi.rs` 的同名型別，S0 已定）。
@@ -35,6 +37,9 @@ pub struct RenderContext {
     instance: wgpu::Instance,
     gpu: Option<Gpu>,
     resources: Option<DocumentResources>,
+    /// Pass 2 與 Pass 3 共用，所以住在 context 不住在任一個 pass（`E1-wgpu §7.1`）。
+    mask: Option<MaskBinding>,
+    composite: Option<CompositePass>,
     attached: Option<Attached>,
 }
 
@@ -45,6 +50,8 @@ impl RenderContext {
             instance: wgpu::Instance::new(instance_descriptor()),
             gpu: None,
             resources: None,
+            mask: None,
+            composite: None,
             attached: None,
         }
     }
@@ -59,6 +66,14 @@ impl RenderContext {
         if self.resources.is_none() {
             self.resources = Some(DocumentResources::new(gpu, pack)?);
         }
+        let resources = self.resources.as_ref().expect("剛剛才建好");
+
+        let mask = self.mask.get_or_insert_with(|| MaskBinding::new(gpu));
+        // Pipeline 只建一次——mask mode 切換不重建（§6），資源格式不隨文件變。
+        let composite = self
+            .composite
+            .get_or_insert_with(|| CompositePass::new(gpu, SURFACE_FORMAT, mask));
+        composite.bind_document(gpu, resources);
         Ok(())
     }
 
@@ -113,6 +128,54 @@ impl RenderContext {
     /// **只丟 surface。** 丟了 device 或資源的話，使用者切出 App 再回來畫作就消失（C5）。
     pub fn detach_surface(&mut self) {
         self.attached = None;
+    }
+
+    /// 一個 frame：Pass 3 Composite。Pass 1／2 由 `E1-stroke` 插在它前面。
+    ///
+    /// 沒有 surface（App 切到背景）時直接回 `Ok`——資源都還在，回前台就能繼續畫（C5）。
+    pub fn render(&mut self, frame: Frame) -> Result<(), RenderError> {
+        let (Some(gpu), Some(composite), Some(mask), Some(attached)) = (
+            self.gpu.as_ref(),
+            self.composite.as_ref(),
+            self.mask.as_ref(),
+            self.attached.as_ref(),
+        ) else {
+            return Ok(());
+        };
+
+        composite.set_frame(gpu, frame);
+
+        // 取不到 drawable 不是錯誤，是**掉一 frame**——下一次 `CADisplayLink` 再來。
+        // `Outdated` / `Lost` 先重設 surface，其餘直接跳過。
+        use wgpu::CurrentSurfaceTexture as Cst;
+        let surface_texture = match attached.surface.get_current_texture() {
+            Cst::Success(t) | Cst::Suboptimal(t) => t,
+            Cst::Outdated | Cst::Lost => {
+                self.configure();
+                return Ok(());
+            }
+            Cst::Timeout | Cst::Occluded | Cst::Validation => return Ok(()),
+        };
+        let view = surface_texture
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
+
+        let mut encoder = gpu
+            .device()
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("frame"),
+            });
+        composite.draw(&mut encoder, &view, mask);
+        gpu.queue().submit([encoder.finish()]);
+        gpu.queue().present(surface_texture);
+        Ok(())
+    }
+
+    /// 切 mask mode（D4 要能在真機上即時比較）：一次 `write_buffer`，不重建 pipeline。
+    pub fn set_mask(&self, uniform: MaskUniform) {
+        if let (Some(gpu), Some(mask)) = (self.gpu.as_ref(), self.mask.as_ref()) {
+            mask.set(gpu, uniform);
+        }
     }
 
     pub fn gpu(&self) -> Option<&Gpu> {

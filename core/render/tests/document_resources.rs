@@ -69,6 +69,20 @@ fn palette_has_one_rgba_f32_entry_per_region() {
     assert_eq!(resources.palette().size(), 8 * 16);
 }
 
+/// `E1-composite.md §5`：32 bytes／筆、長度 `region_count`（65535 區 = 2 MB）。
+/// 零初始化＝全部未填色，那條由 `tests/composite.rs` 從畫面上驗。
+#[test]
+fn fill_animation_buffer_is_thirty_two_bytes_per_region() {
+    let ids: Vec<u16> = vec![0, 1, 2, 3, 4, 5, 6, 7];
+    let gpu = Gpu::headless().expect("headless device");
+
+    let resources =
+        DocumentResources::new(&gpu, &support::pack(4, 2, ids, false)).expect("resources");
+
+    assert_eq!(render::FILL_ANIM_SIZE, 32);
+    assert_eq!(resources.fill().size(), 8 * render::FILL_ANIM_SIZE);
+}
+
 #[test]
 fn undo_snapshot_targets_carry_copy_src_but_wet_does_not() {
     let gpu = Gpu::headless().expect("headless device");

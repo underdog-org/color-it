@@ -7,6 +7,7 @@ use colorpack::{ColorPack, RegionEntry};
 use wgpu::TextureUsages as U;
 
 use crate::error::RenderError;
+use crate::fill::{FILL_ANIM_SIZE, FillAnim};
 use crate::gpu::Gpu;
 
 /// `Buf_palette` 的元素：linear-ish sRGB 編碼值 RGBA（§6 全程在編碼值上合成）。
@@ -22,6 +23,7 @@ pub struct DocumentResources {
     erase: wgpu::Texture,
     wet: wgpu::Texture,
     palette: wgpu::Buffer,
+    fill: wgpu::Buffer,
     region_ids: Vec<u16>,
     regions: Vec<RegionEntry>,
 }
@@ -124,6 +126,15 @@ impl DocumentResources {
             mapped_at_creation: false,
         });
 
+        // 擴散動畫，`E1-composite.md §5`。零初始化 = 全部「從未填色」。
+        // 每 frame 只 write_buffer 進行中的 entry（32 bytes 一筆），不是整份 2 MB。
+        let fill = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Buf_fill"),
+            size: u64::from(pack.manifest.region_count) * FILL_ANIM_SIZE,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
         Ok(Self {
             canvas_size: [w, h],
             line,
@@ -133,6 +144,7 @@ impl DocumentResources {
             erase,
             wet,
             palette,
+            fill,
             region_ids: pack.region_ids.clone(),
             regions: pack.regions.clone(),
         })
@@ -168,6 +180,28 @@ impl DocumentResources {
 
     pub fn palette(&self) -> &wgpu::Buffer {
         &self.palette
+    }
+
+    pub fn fill(&self) -> &wgpu::Buffer {
+        &self.fill
+    }
+
+    /// 單一區域的底色，編碼值 RGBA（`a == 0` 表未填色）。`E1-bucket` 的寫入口。
+    pub fn write_palette(&self, gpu: &Gpu, region_id: u32, rgba: [f32; 4]) {
+        gpu.queue().write_buffer(
+            &self.palette,
+            u64::from(region_id) * PALETTE_ENTRY_SIZE,
+            bytemuck::bytes_of(&rgba),
+        );
+    }
+
+    /// 單一區域的擴散動畫狀態。**只寫進行中的 entry**（§5 的更新成本）。
+    pub fn write_fill(&self, gpu: &Gpu, region_id: u32, anim: FillAnim) {
+        gpu.queue().write_buffer(
+            &self.fill,
+            u64::from(region_id) * FILL_ANIM_SIZE,
+            bytemuck::bytes_of(&anim),
+        );
     }
 
     /// 油漆桶的 `tap` 必須**同步**拿到 region ID（§5.1）——單像素 readback 至少一 frame

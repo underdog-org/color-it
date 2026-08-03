@@ -5,9 +5,10 @@ iOS 著色 App。核心是「**受區域約束的塗抹**」——不是繪圖�
 
 **當前**：M0／M1／S0 完成，進行中 **E1 手感垂直切片**（★最高風險，8 週時間盒，見 `docs/roadmap/E1.md`）。
 六份 E1 spec 寫了三份（`E1-wgpu` / `E1-composite` / `E1-stroke`，拆分依據在 `docs/specs/E1-spec-plan.md`），**還差 `E1-bucket` / `E1-input` / `E1-perf`**。
-`core/render` 已落地 wgpu 起手：`Gpu`／`RenderContext`／`DocumentResources` 七資源／`MaskBinding`，13 條測試在真 GPU 上跑。
-**下一步**：composite 六層 shader（`E1-composite.md`）——接上就看得到線稿。
+`core/render` 已落地 wgpu 起手（`Gpu`／`RenderContext`／`DocumentResources` 七資源＋`Buf_fill`／`MaskBinding`）與 **Pass 3 Composite**（`CompositePass`、`shaders/composite.wgsl` 六層），22 條測試在真 GPU 上跑。
+**下一步**：Pass 1／2（`E1-stroke.md`）與油漆桶 CPU 側（`E1-bucket`，動畫推進與 `prev_color` 寫入）。
 > `attach_surface` 需要真的 `CAMetalLayer`，無自動測試，等接上 iOS 端才驗得到。
+> M0 交出第一份 `.colorpack` 之前，composite 與 `thumb.jpg` 的逐像素比對做不了（`E1-composite §9` 第 1 條）。
 
 > 產品原名 `Color It`，2026-08-03 因商標衝突改名 **Colorlull**（`docs/specs/naming.md`）。
 > 目錄名 `color-it/` 尚未改，`architecture.md §3` 的結構圖照現況寫。

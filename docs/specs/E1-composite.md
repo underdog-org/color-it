@@ -1,6 +1,6 @@
 # E1 · Composite Pass
 
-> 狀態：草案（2026-08-03）｜里程碑：[E1](../roadmap/E1.md)｜計畫：[E1-spec-plan](./E1-spec-plan.md)
+> 狀態：已實作（2026-08-03）｜里程碑：[E1](../roadmap/E1.md)｜計畫：[E1-spec-plan](./E1-spec-plan.md)
 >
 > 資源型別、格式、pass ↔ 資源矩陣見 [E1-wgpu](./E1-wgpu.md)，本文只定 Pass 3 的內容。
 
@@ -105,7 +105,7 @@ color       = color * textureSample(T_shade, samp, in.uv).rgb;
 color       = color * textureSample(T_line,  samp, in.uv).rgb;
 ```
 
-**與 `§4.2` 的三處差異**：
+**與 `§4.2` 的四處差異**：
 
 1. **`erased` 的套用位置**。`§4.2` 寫 `mix(palette[id], PAPER_WHITE, erased)`，
    但那樣「從未填色」與「填了又擦掉」無法區分。改成先用 `palette.a` 決定有沒有底色（②），
@@ -114,6 +114,16 @@ color       = color * textureSample(T_line,  samp, in.uv).rgb;
 3. **`T_region` / `T_paint` / `T_erase` / `T_wet` 用 `textureLoad`**（整數座標、無 sampler），
    `T_line` / `T_shade` 用 `textureSample`（linear filter，畫布縮放時需要）。
    `T_region` 必須 `textureLoad`——`R16Uint` 綁不了 sampler（`E1-wgpu.md §5.2`）。
+4. **`T_line` / `T_shade` 的取樣座標是畫布 UV，不是上面寫的 `in.uv`。**
+   `in.uv` 是螢幕 UV；畫布 letterbox 時（`scale` 為 fit，四周有背景）兩者不同，
+   用螢幕 UV 會把線稿拉伸到整個螢幕。正確的是 `p / canvas_size`，
+   其中 `p` 是 `canvas_coord()` 未取整前的浮點值。E1 的 fit-to-screen 下
+   兩者在畫布內剛好相等，所以這個錯不會自己浮出來——`tests/composite.rs::
+   outside_the_canvas_shows_the_background_color` 用左右不同色的線稿釘住它。
+
+`brush_color`（第 ④ 層）沒有既有的歸屬——`E1-wgpu §7.1` 只定了 mask uniform。
+暫時放在 composite 自己的 frame uniform（連同 `Transform`、`screen_size`、背景色）。
+Pass 2 commit 也要同一個值時再提升成共用 group。
 
 ### 3.1 `PAPER_WHITE`
 
@@ -239,11 +249,14 @@ Composite 是頻寬受限而非算術受限。真正的成本在 Pass 1，而它
 - [ ] **與 `thumb.jpg` 一致**：把 `palette` 設為各區的 `suggested_color`、無使用者筆刷，
       composite 輸出降採樣至長邊 512，與 `.colorpack` 內的 `thumb.jpg`
       在 JPEG 容差內相符。**這是色彩空間唯一的客觀驗收**
-- [ ] 無 `shade` 的文件與有 `shade` 的文件走同一個 pipeline，輸出正確
-- [ ] 未填色區域顯示 `PAPER_WHITE`；填色後擦除一塊，該塊回到 `PAPER_WHITE`
-- [ ] 首次填色是白紙淡入，重新填色是交叉淡出，連點兩次不跳變
-- [ ] Mask A／B 即時切換，畫面立即反映，無 pipeline 重建
-- [ ] 畫布外區域顯示背景色，與畫布邊界清晰可辨
+      > **卡在 M0**：還沒有任何 `.colorpack`。在那之前由
+      > `tests/composite.rs::composite_matches_baker_thumb_integer_math` 頂著——
+      > 直接驗 `thumb.rs` 的整數算術本身，不降採樣、不過 JPEG，比本條更嚴格。
+- [x] 無 `shade` 的文件與有 `shade` 的文件走同一個 pipeline，輸出正確
+- [x] 未填色區域顯示 `PAPER_WHITE`；填色後擦除一塊，該塊回到 `PAPER_WHITE`
+- [x] 首次填色是白紙淡入，重新填色是交叉淡出，連點兩次不跳變
+- [x] Mask A／B 即時切換，畫面立即反映，無 pipeline 重建（offscreen 已驗；真機比較是 D4）
+- [x] 畫布外區域顯示背景色，與畫布邊界清晰可辨
 - [ ] p99 frame time 記錄進 `docs/perf-baseline.md`（`E1-perf`）
 
 ## 10. 要回寫的既有文件
@@ -255,3 +268,5 @@ Composite 是頻寬受限而非算術受限。真正的成本在 Pass 1，而它
 | `architecture.md §4.4` | Mode B 不是 `id != REGION_LINEART`，是無條件通過（§6） |
 | `architecture.md §4.5` | 擴散動畫補 `prev_color` 欄位（§5） |
 | `roadmap/E1.md` 第 61 行 | Mode B 的描述同上 |
+
+五條全部完成（`E1-wgpu.md` 的三處在起手那一版就寫回了）。

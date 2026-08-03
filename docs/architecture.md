@@ -353,15 +353,24 @@ clear T_wet
 ```wgsl
 let id     = textureLoad(T_region, coord).r;
 let erased = textureLoad(T_erase,  coord).r;               // 0..1
-var color  = mix(palette[id], PAPER_WHITE, erased);        // 油漆桶底色，可被局部擦除
+let base   = fill_animated(id);                            // 油漆桶底色＋擴散動畫（§4.5）
+var color  = mix(PAPER_WHITE, base.rgb, base.a);           // a == 0 表從未填色
+color      = mix(color, PAPER_WHITE, erased);              // 底色可被局部擦除
 color      = over(color, textureLoad(T_paint, coord));     // 已提交的筆刷
 color      = over(color, tint(textureLoad(T_wet, coord),
                               brush_color) * mask(id));    // 進行中的筆畫
-color      = color * textureSample(T_shade, coord);        // Multiply
-color      = color * textureSample(T_line,  coord);        // Multiply，線稿蓋頂
+color      = color * textureSample(T_shade, canvas_uv);    // Multiply
+color      = color * textureSample(T_line,  canvas_uv);    // Multiply，線稿蓋頂
 ```
 
 `PAPER_WHITE` 是常數——未上色 = 白紙，不是透明（`prd.md §4.1`）。
+
+**`erased` 要在 `PAPER_WHITE` 已經填進去之後才套**，不能寫成
+`mix(palette[id], PAPER_WHITE, erased)`——那樣「從未填色」與「填了又擦掉」無法區分
+（`Buf_palette` 的 `a == 0` 才是「未填色」的表示）。
+
+**全部在 sRGB 編碼值上合成，不 linearize。** 決定性理由是畫布必須跟 baker 的
+`thumb.jpg` 長一樣，而那是 u8 整數乘法算的。完整論證見 `specs/E1-composite.md §2`。
 
 **`T_shade` 是選配**：沒有 shade 的文件綁定一張 1×1 的白色 dummy texture，不做 shader variant。多一個 pipeline 變體換不到任何效能。
 
@@ -408,13 +417,16 @@ Composite 成本低，每 frame 全畫面重跑即可。真正的成本在 Strok
 // Mode A 嚴格（油漆桶）
 mask = select(0.0, 1.0, id == active_region_id);
 
-// Mode B 寬鬆（筆刷、橡皮擦）
-mask = select(0.0, 1.0, id != REGION_LINEART);
+// Mode B 寬鬆（筆刷、橡皮擦）——**無條件通過，完全不遮罩**
+mask = 1.0;
 ```
+
+> Mode B 原本寫 `id != REGION_LINEART`。baker 產出的 ID map 是滿的、沒有保留 ID
+> （`specs/baker-core-design.md §2.5`），該條件恆為真——`REGION_LINEART` 不存在。
 
 Mask mode 是 `Tool` 的參數，不是全域設定。產品語意見 `prd.md §4.1`。
 
-**橡皮擦固定 Mode B，不可切換。** 它沒有建立 `active_region_id` 的語意（沒有「先選中再擦」的動作），而且使用者拿橡皮擦時是在修正錯誤——最不希望被區域邊界卡住的時刻。`id != REGION_LINEART` 已經提供足夠的無害性：怎麼擦都不會擦掉線稿。
+**橡皮擦固定 Mode B，不可切換。** 它沒有建立 `active_region_id` 的語意（沒有「先選中再擦」的動作），而且使用者拿橡皮擦時是在修正錯誤——最不希望被區域邊界卡住的時刻。「怎麼擦都不會擦掉線稿」這個保證仍然成立，但**來源是 composite 的層序**（`T_line` 永遠 Multiply 蓋在最頂），與 mask 無關。
 
 > `prd.md` 附錄 A6 記錄了一個未決提案（全域「封閉線稿」開關），它會把 mask mode 從工具參數變成使用者設定。在 D4 拍板之前，實作以本節為準。
 
@@ -432,10 +444,15 @@ tap(x, y) → id = T_region[x, y] → palette[id] = color
 擴散動畫在 composite shader 內完成：
 
 ```wgsl
-let t = fill_progress[id];                       // 0..1，由 CPU 每 frame 更新
-let d = distance(uv, fill_origin[id]);
-let a = smoothstep(d - EDGE, d, t * max_radius[id]);
+let f    = fill[id];                             // 每區一筆 FillAnim，32 bytes
+let d    = distance(canvas_coord, f.origin);
+let t    = smoothstep(d - FILL_EDGE, d, f.progress * f.max_radius);
+let base = mix(f.prev_color, palette[id], t);    // 併進 composite 第 ① 層，不另開 pass
 ```
+
+**`prev_color`（這次填色之前該區域的顏色）是必要欄位。** 沒有它，重複填同一區時
+動畫的起點無從得知——只能從新顏色跳變，或錯誤地從白紙淡入。有了它，「從未填色 /
+首次填色 / 重新填色」三種情況用同一條式子涵蓋（`specs/E1-composite.md §5`）。
 
 **`max_radius` 是 per-tap 的，不是 per-region 的。** `fill_origin` 是點擊處，所以「離 origin 最遠的距離」隨每次點擊而變。實作上以 region bbox 的對角線作為近似即可（保守地略大，寧可動畫早一點結束）。
 
