@@ -547,22 +547,24 @@ pub fn write_torture(repo_root: &Path) -> Result<PathBuf> {
 
 // ── 合格的小型素材（端到端測試用）───────────────────────────────────
 
+/// 由上而下的柔和漸層，luma 一律 ≥ 60（`assets-spec §4.4`）。
+fn soft_shade(width: u32, height: u32) -> Vec<u8> {
+    let mut buf = vec![255u8; (width * height * 4) as usize];
+    for y in 0..height {
+        let v = 255 - (y * 100 / height) as u8;
+        for x in 0..width {
+            let i = ((y * width + x) * 4) as usize;
+            buf[i..i + 3].copy_from_slice(&[v, v, v]);
+        }
+    }
+    buf
+}
+
 /// 一張合規的合成素材：粗網格 ＋ 邊界線稿 ＋ PERM 配色。
 pub fn valid(id: &str, width: u32, height: u32, cell: u32, has_shade: bool) -> Asset {
     let mut canvas = Canvas::new(width, height);
     zone_grid(&mut canvas, (0, 0, width, height), 0, cell);
-    let shade = has_shade.then(|| {
-        // 由上而下的柔和漸層，luma 一律 ≥ 60（`assets-spec §4.4`）。
-        let mut buf = vec![255u8; (width * height * 4) as usize];
-        for y in 0..height {
-            let v = 255 - (y * 100 / height) as u8;
-            for x in 0..width {
-                let i = ((y * width + x) * 4) as usize;
-                buf[i..i + 3].copy_from_slice(&[v, v, v]);
-            }
-        }
-        buf
-    });
+    let shade = has_shade.then(|| soft_shade(width, height));
     Asset {
         id: id.to_owned(),
         title: format!("Synthetic {id}"),
@@ -573,6 +575,52 @@ pub fn valid(id: &str, width: u32, height: u32, cell: u32, has_shade: bool) -> A
         lineart: canvas.lineart_rgba(),
         seeds: canvas.seeds_rgba(),
         shade,
+        seeds_icc: None,
+        compression: png::Compression::Fast,
+    }
+}
+
+// ── golden 素材（`baker-seeds.md §6` 第 1 條）──────────────────────────
+
+const G_CELL: u32 = 512;
+
+/// 埋在 cell(2,3) 裡的小方塊。邊界成線之後內部剩 18×18 = 324px，低於
+/// `MIN_ORPHAN_AREA`(500)；色標再擦掉，它就是 `merge_small_orphans` 該**靜默併掉**
+/// 的碎片。沒有它，golden 只釘得住 `grow` + `close`，併碎片那條路徑
+/// （穿線找最近環、取面積最大的鄰居、平手取較小 id）在整合層面完全沒有網。
+const G_FRAGMENT: (u32, u32, u32, u32) = (2 * G_CELL + 100, 3 * G_CELL + 100, 20, 20);
+
+/// golden test 的固定素材。**不要改它**——改了就等於改掉凍結值，
+/// 而凍結值存在的理由正是「演算法改了會被擋下」。
+///
+/// 3072×4096、512 格 → 6×8 = 48 區，有 shade（走 `has_shade = true` 那條路徑），
+/// 外加一塊 `G_FRAGMENT`。
+pub fn golden() -> Asset {
+    let mut canvas = Canvas::new(F_W, F_H);
+    zone_grid(&mut canvas, (0, 0, F_W, F_H), 0, G_CELL);
+    let (fx, fy, fw, fh) = G_FRAGMENT;
+    // 15 與 cell(2,3) 的 7 不同色，邊界才生得出線。
+    canvas.rect(fx, fy, fw, fh, 15);
+
+    let lineart = canvas.lineart_rgba();
+    let mut seeds = canvas.seeds_rgba();
+    // 擦掉碎片自己的色標——`seeds_rgba` 每個 idx 連通塊都會點一個。
+    for y in fy..fy + fh {
+        for x in fx..fx + fw {
+            seeds[((y * F_W + x) * 4 + 3) as usize] = 0;
+        }
+    }
+
+    Asset {
+        id: "synth-golden".to_owned(),
+        title: "Synthetic golden".to_owned(),
+        category: "mandala".to_owned(),
+        notes: "golden test 的固定素材，不是繪師交付。改動它等於改掉凍結值。".to_owned(),
+        width: F_W,
+        height: F_H,
+        lineart,
+        seeds,
+        shade: Some(soft_shade(F_W, F_H)),
         seeds_icc: None,
         compression: png::Compression::Fast,
     }
@@ -748,10 +796,8 @@ mod tests {
     fn every_cell_gets_exactly_one_usable_seed() {
         let mut g = Canvas::new(128, 128);
         zone_grid(&mut g, (0, 0, 128, 128), 0, 32);
-        let line = crate::binarize::line_mask(
-            &g.lineart_rgba(),
-            crate::binarize::DEFAULT_LINE_THRESHOLD,
-        );
+        let line =
+            crate::binarize::line_mask(&g.lineart_rgba(), crate::binarize::DEFAULT_LINE_THRESHOLD);
         let seeds = crate::seeds::read(&g.seeds_rgba(), 128, 128);
 
         assert_eq!(seeds.len(), 16, "4×4 格 → 16 個色標，多一個就是色點斷開了");

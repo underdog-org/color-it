@@ -261,7 +261,13 @@ mod tests {
             area: 900,
             anchor: (50, 50),
         }];
-        let out = seeds(&list, &grown(vec![(1, 2)], vec![3]), &orphans, MIN_SEED_AREA, MIN_ORPHAN_AREA);
+        let out = seeds(
+            &list,
+            &grown(vec![(1, 2)], vec![3]),
+            &orphans,
+            MIN_SEED_AREA,
+            MIN_ORPHAN_AREA,
+        );
 
         let codes: Vec<&str> = out.iter().map(|d| d.code).collect();
         assert!(codes.contains(&code::SEED_TOO_SMALL), "{codes:?}");
@@ -275,7 +281,13 @@ mod tests {
     #[test]
     fn a_collision_reports_both_anchors_as_a_pair() {
         let list = [seed_at(1, 1, 999), seed_at(7, 3, 999)];
-        let out = seeds(&list, &grown(vec![(0, 1)], Vec::new()), &[], MIN_SEED_AREA, MIN_ORPHAN_AREA);
+        let out = seeds(
+            &list,
+            &grown(vec![(0, 1)], Vec::new()),
+            &[],
+            MIN_SEED_AREA,
+            MIN_ORPHAN_AREA,
+        );
         let d = out.iter().find(|d| d.code == code::SEED_COLLISION).unwrap();
         assert_eq!(d.coords, vec![(1, 1), (7, 3)]);
     }
@@ -293,7 +305,13 @@ mod tests {
                 anchor: (1, 1),
             },
         ];
-        let out = seeds(&[], &grown(Vec::new(), Vec::new()), &orphans, MIN_SEED_AREA, MIN_ORPHAN_AREA);
+        let out = seeds(
+            &[],
+            &grown(Vec::new(), Vec::new()),
+            &orphans,
+            MIN_SEED_AREA,
+            MIN_ORPHAN_AREA,
+        );
         let d = out.iter().find(|d| d.code == code::ORPHAN_AREA).unwrap();
         assert_eq!(d.coords, vec![(9, 9), (1, 1)]);
         assert!(d.message.contains("9000px"), "{}", d.message);
@@ -303,7 +321,16 @@ mod tests {
     #[test]
     fn a_clean_asset_produces_no_seed_diagnostics() {
         let list = [seed_at(1, 1, 999)];
-        assert!(seeds(&list, &grown(Vec::new(), Vec::new()), &[], MIN_SEED_AREA, MIN_ORPHAN_AREA).is_empty());
+        assert!(
+            seeds(
+                &list,
+                &grown(Vec::new(), Vec::new()),
+                &[],
+                MIN_SEED_AREA,
+                MIN_ORPHAN_AREA
+            )
+            .is_empty()
+        );
     }
 
     /// 白底交付的線稿：alpha 全滿 → 整張都判成線。這是 `line-coverage` 的唯一用途。
@@ -312,7 +339,10 @@ mod tests {
         let out = line_coverage(1.0, MAX_LINE_RATIO);
         assert_eq!(out[0].code, code::LINE_COVERAGE);
         assert_eq!(out[0].severity, crate::report::Severity::Warning);
-        assert!(line_coverage(MAX_LINE_RATIO, MAX_LINE_RATIO).is_empty(), "門檻上不報");
+        assert!(
+            line_coverage(MAX_LINE_RATIO, MAX_LINE_RATIO).is_empty(),
+            "門檻上不報"
+        );
     }
 
     #[test]

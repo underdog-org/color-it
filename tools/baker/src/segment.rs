@@ -417,7 +417,11 @@ mod tests {
         let line = vec![false, false, false];
         let g = grow(&[seed(0, 0), seed(2, 0)], &line, 3, 1);
         assert_eq!(g.collisions, vec![(0, 1)], "先佔住的是 seed 0");
-        assert_eq!(g.labels, vec![0, 0, 0], "整條仍歸 seed 0，preview 才畫得出來");
+        assert_eq!(
+            g.labels,
+            vec![0, 0, 0],
+            "整條仍歸 seed 0，preview 才畫得出來"
+        );
     }
 
     /// anchor 落在線上 → flood fill 起不來，回報而非 panic。
@@ -444,13 +448,7 @@ mod tests {
         // 7x1：[有主][線][孤兒 x1][線][孤兒 x3]
         let line = vec![false, true, false, true, false, false, false];
         let labels = vec![
-            0,
-            UNASSIGNED,
-            UNASSIGNED,
-            UNASSIGNED,
-            UNASSIGNED,
-            UNASSIGNED,
-            UNASSIGNED,
+            0, UNASSIGNED, UNASSIGNED, UNASSIGNED, UNASSIGNED, UNASSIGNED, UNASSIGNED,
         ];
         let orphans = find_orphans(&labels, &line, 7, 1);
         assert_eq!(orphans.len(), 2);
@@ -483,7 +481,11 @@ mod tests {
     fn the_middle_of_an_odd_width_line_goes_to_the_smaller_id() {
         let mut labels = vec![0, UNASSIGNED, UNASSIGNED, UNASSIGNED, 1];
         let (rounds, left) = close(&mut labels, 5, 1);
-        assert_eq!(labels, vec![0, 0, 0, 1, 1], "第 2 輪時中央同時鄰接 0 與 1，取 0");
+        assert_eq!(
+            labels,
+            vec![0, 0, 0, 1, 1],
+            "第 2 輪時中央同時鄰接 0 與 1，取 0"
+        );
         assert_eq!((rounds, left), (2, 0));
     }
 
@@ -499,7 +501,10 @@ mod tests {
     fn small_fragments_merge_and_large_ones_are_reported() {
         // 9x1：[區 0 x2][線][碎片 x1][線][大塊 x3]，門檻 3
         let line = vec![false, false, true, false, true, false, false, false, false];
-        let mut labels = vec![0, 0, UNASSIGNED, UNASSIGNED, UNASSIGNED, UNASSIGNED, UNASSIGNED, UNASSIGNED, UNASSIGNED];
+        let mut labels = vec![
+            0, 0, UNASSIGNED, UNASSIGNED, UNASSIGNED, UNASSIGNED, UNASSIGNED, UNASSIGNED,
+            UNASSIGNED,
+        ];
         let kept = merge_small_orphans(&mut labels, &line, 9, 1, &[2], 3);
 
         assert_eq!(kept.len(), 1, "只有 ≥3px 的那塊該留下來");

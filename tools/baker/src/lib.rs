@@ -65,9 +65,7 @@ impl Params {
     /// `--set key=value` 的解析。認不得的 key 直接報錯並列出四個合法值——
     /// 打錯字卻靜默套用預設是最難查的那種 bug。
     pub fn set(&mut self, key: &str, value: &str) -> Result<()> {
-        let bad = |what: &str| {
-            anyhow::anyhow!("--set {key}={value}：{value:?} 不是合法的 {what}")
-        };
+        let bad = |what: &str| anyhow::anyhow!("--set {key}={value}：{value:?} 不是合法的 {what}");
         match key {
             "line_threshold" => self.line_threshold = value.parse().map_err(|_| bad("u8"))?,
             "min_seed_area" => self.min_seed_area = value.parse().map_err(|_| bad("u32"))?,
@@ -132,10 +130,8 @@ pub fn bake(dir: &Path, opts: &BakeOptions) -> Result<Report> {
     let seeds_img = Image::load(&src.seeds)?;
     let shade = src.shade.as_ref().map(|p| Image::load(p)).transpose()?;
 
-    let mut named: Vec<(&str, &Image)> = vec![
-        (source::LINEART, &lineart),
-        (source::SEEDS, &seeds_img),
-    ];
+    let mut named: Vec<(&str, &Image)> =
+        vec![(source::LINEART, &lineart), (source::SEEDS, &seeds_img)];
     if let Some(shade) = &shade {
         named.push((source::SHADE, shade));
     }
@@ -477,6 +473,10 @@ mod tests {
         assert!(report.summary.is_none(), "沒打包出來就不該有 summary");
         let stats = report.seeds.expect("拒收也要列出色標統計");
         assert_eq!(stats.seeds, 2);
-        assert!(report.to_text().contains("色標 2 個"), "{}", report.to_text());
+        assert!(
+            report.to_text().contains("色標 2 個"),
+            "{}",
+            report.to_text()
+        );
     }
 }

@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 - 繪師交付改為「線稿＋色標圖」，刪除 flats/reference，區域改由線稿封閉區 flood fill 推導；`.colorpack` 與 App 端零改動。Phase 0 需先驗證線稿封閉性，否決則退回「保留 flats ＋ baker 端量化 snap」
+- baker 新增 golden test：固定素材 → 凍結 `region_ids` 與 `content_hash`，守住 `grow`／`merge_small_orphans`／`close` 的確定性（舊 `label_regions` 是精確色比對，確定性是白送的）
 
 ## [v0.2]
 
