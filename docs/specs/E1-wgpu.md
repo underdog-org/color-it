@@ -82,6 +82,7 @@ SurfaceTargetUnsafe::CoreAnimationLayer(layer_ptr as *mut c_void)
 | format | `Bgra8Unorm` | Metal 原生。**非 sRGB 變體**——composite 直接輸出編碼值（§6） |
 | present mode | `Fifo` | 由 `CADisplayLink` 驅動，vsync 對齊。`E1-input` 擁有 FrameDriver |
 | alpha mode | `Opaque` | `EngineCanvasView.isOpaque = true` 已設 |
+| color space | `Auto` | wgpu 30 的 `SurfaceConfiguration` 新欄位。非 sRGB 格式 ＋ `Auto` = presentation engine 直接把寫進去的值當編碼值，硬體不 decode／encode（§6） |
 | **`maximumDrawableCount`** | **2（待 D3 實測）** | 預設 3 會多排一格 latency。這是 motion-to-photon 最便宜的一根調節桿，列為 `E1-perf` 的量測項 |
 
 `maximumDrawableCount` 要在 Swift 端的 `CAMetalLayer` 上設，不是 wgpu 的 API——
@@ -95,9 +96,9 @@ SurfaceTargetUnsafe::CoreAnimationLayer(layer_ptr as *mut c_void)
 
 | 資源 | wgpu format | usage | 初始內容 |
 |---|---|---|---|
-| `T_line` | `Rgba8Unorm` | `TEXTURE_BINDING \| COPY_DST` | 解碼 `lineart.png` |
-| `T_shade` | `Rgba8Unorm` | `TEXTURE_BINDING \| COPY_DST` | 解碼 `shade.png`，或 1×1 白 dummy |
-| `T_region` | **`R16Uint`** | `TEXTURE_BINDING \| COPY_DST` | 解 RLE 的 `Vec<u16>`（§5） |
+| `T_line` | `Rgba8Unorm` | `TEXTURE_BINDING \| COPY_DST \| COPY_SRC` | 解碼 `lineart.png` |
+| `T_shade` | `Rgba8Unorm` | `TEXTURE_BINDING \| COPY_DST \| COPY_SRC` | 解碼 `shade.png`，或 1×1 白 dummy |
+| `T_region` | **`R16Uint`** | `TEXTURE_BINDING \| COPY_DST \| COPY_SRC` | 解 RLE 的 `Vec<u16>`（§5） |
 | `T_paint` | `Rgba8Unorm` | `TEXTURE_BINDING \| RENDER_ATTACHMENT \| COPY_SRC` | 全 0（透明） |
 | `T_erase` | `R8Unorm` | `TEXTURE_BINDING \| RENDER_ATTACHMENT \| COPY_SRC` | 全 0（未擦除） |
 | `T_wet` | `R8Unorm` | `TEXTURE_BINDING \| RENDER_ATTACHMENT` | 全 0 |
@@ -221,9 +222,12 @@ wgpu 在 macOS 上不需要 surface 就能建 device，所以 `render` 可以有
 - `RenderContext::headless()`——建 device／queue 不建 surface
 - `DocumentResources` 配置：格式、尺寸、`T_shade` dummy 分支
 - **`T_region` 上傳 round-trip**：`Vec<u16>` → texture → readback → 逐值比對。
-  這是唯一能證明「無損」的機制，值得為它給 `T_region` 加 `COPY_SRC`
+  這是唯一能證明「無損」的機制，值得為它給 `T_region` 加 `COPY_SRC`。
+  同一個理由對 `T_line` / `T_shade` 也成立——驗收第 5 條要證明缺席時綁的 dummy
+  **是白的**（Multiply 的單位元），不讀回來就只能驗尺寸。三張唯讀貼圖一律加
 - pass 的 offscreen 比對歸 `E1-composite`
 
+**已驗**：開發機（macOS）拿得到 Metal adapter，上述測試全部真的在 GPU 上跑。
 **待驗證**：CI 的 macOS runner 有沒有可用的 Metal device。若沒有就標 `#[ignore]`
 改本機 pre-push 跑——**不要因此不寫**。
 

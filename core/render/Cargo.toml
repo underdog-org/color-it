@@ -14,4 +14,9 @@ workspace = true
 colorlull-colorpack = { workspace = true }
 colorlull-stroke = { workspace = true }
 bytemuck = { workspace = true }
+png = { workspace = true }
+thiserror = { workspace = true }
 wgpu = { workspace = true }
+
+[dev-dependencies]
+png = { workspace = true }

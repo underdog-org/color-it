@@ -502,6 +502,8 @@ dependencies = [
  "bytemuck",
  "colorlull-colorpack",
  "colorlull-stroke",
+ "png",
+ "thiserror",
  "wgpu",
 ]
 

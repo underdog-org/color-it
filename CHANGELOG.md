@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+**Render（E1）**
+- `core/render` 落地 wgpu 起手：`Gpu`（Metal-only、零 optional feature）、`RenderContext` 的 attach／resize／detach 狀態機、`DocumentResources` 七資源、`MaskBinding`
+- `T_region` 上傳 round-trip 逐值相等（`E1-wgpu` 驗收第 4 條）；detach 後 `T_paint` 內容不變（第 3 條）；`T_shade` 缺席綁 1×1 白 dummy（第 5 條）
+- `E1-wgpu.md` §4：`T_line`／`T_shade`／`T_region` 一律加 `COPY_SRC`（唯一能驗證上傳內容的機制）；§3.1 補 wgpu 30 的 `color_space: Auto`
+- 開發機確認拿得到 Metal adapter，`render` 的測試真的在 GPU 上跑；CI runner 待驗
+
 - 繪師交付改為「線稿＋色標圖」，刪除 flats/reference，區域改由線稿封閉區 flood fill 推導；`.colorpack` 與 App 端零改動。Phase 0 需先驗證線稿封閉性，否決則退回「保留 flats ＋ baker 端量化 snap」
 
 ## [v0.2]
