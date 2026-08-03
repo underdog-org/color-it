@@ -41,11 +41,24 @@ enum Command {
         #[arg(long = "debug-out", value_name = "DIR")]
         debug_out: Option<PathBuf>,
     },
-    /// 產生 .xcframework ＋ Swift binding → apps/ios/Generated/
+    /// 產生 .xcframework ＋ Swift binding → apps/ios/Generated/，並附帶 dev-pack
     Ios,
+    /// bake 一顆 pack 進 iOS bundle，讓 `-engine rust` 有東西可讀
+    DevPack {
+        /// 素材來源目錄。預設 assets/source/kirby-demo-1
+        dir: Option<PathBuf>,
+    },
     /// CI gate：檢查 uniffi binding 是否為最新
     VerifyGenerated,
 }
+
+/// `cargo xtask dev-pack` 的預設素材。挑 kirby 是因為它 1:1、有 shade、57 區——
+/// 手感測試要的就是「區夠多、夠雜」。
+const DEV_PACK_SOURCE: &str = "assets/source/kirby-demo-1";
+
+/// bundle 裡的固定檔名。**gitignore**——`assets/packs/` 不進 git
+/// （`architecture.md §12.2`），複製進 app 的這顆沒有理由破例。
+const DEV_PACK_DEST: &str = "apps/ios/ColorApp/Resources/dev.colorpack";
 
 fn main() -> Result<()> {
     match Cli::parse().command {
@@ -58,9 +71,50 @@ fn main() -> Result<()> {
             report,
             debug_out,
         } => bake(&dir, out, report, debug_out),
-        Command::Ios => ios::run(&metadata::load()?),
+        // dev-pack 綁在 `ios` 裡而不是獨立一步：忘記跑它的懲罰是 App 靜默退回
+        // `MockEngine`，而那個症狀（「畫得動但沒有線稿」）要花很久才會被認出來。
+        Command::Ios => {
+            let workspace = metadata::load()?;
+            ios::run(&workspace)?;
+            dev_pack(&workspace.root, None)
+        }
+        Command::DevPack { dir } => dev_pack(&metadata::load()?.root, dir),
         Command::VerifyGenerated => ios::verify_generated(&metadata::load()?),
     }
+}
+
+/// bake 素材並複製成 `apps/ios/ColorApp/Resources/dev.colorpack`。
+///
+/// Xcode 16 的 synchronized group 會自動把它收進 bundle，所以除了「檔案存在」
+/// 之外不需要動 `project.pbxproj`。
+fn dev_pack(root: &Path, dir: Option<PathBuf>) -> Result<()> {
+    let source = dir.unwrap_or_else(|| root.join(DEV_PACK_SOURCE));
+    let out_dir = root.join("assets/packs");
+    let report = baker::bake(
+        &source,
+        &baker::BakeOptions {
+            out_dir: out_dir.clone(),
+            report_json: None,
+            params: baker::Params::default(),
+            debug_out: None,
+        },
+    )?;
+    if report.has_error() {
+        print!("{}", report.to_text());
+        bail!("dev-pack：{} 未通過驗證", report.id);
+    }
+
+    let dest = root.join(DEV_PACK_DEST);
+    let parent = dest
+        .parent()
+        .context("DEV_PACK_DEST 沒有上層目錄，這是常數寫錯")?;
+    std::fs::create_dir_all(parent).with_context(|| format!("建立 {} 失敗", parent.display()))?;
+    let baked = out_dir.join(format!("{}.colorpack", report.id));
+    std::fs::copy(&baked, &dest)
+        .with_context(|| format!("複製 {} → {} 失敗", baked.display(), dest.display()))?;
+
+    println!("dev-pack：{} → {DEV_PACK_DEST}", report.id);
+    Ok(())
 }
 
 fn gen_torture() -> Result<()> {

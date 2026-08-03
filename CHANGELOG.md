@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+**真機測試 harness（E1）**
+- `cargo xtask dev-pack [DIR]`：bake 一顆 pack 進 `apps/ios/ColorApp/Resources/dev.colorpack`（預設素材 `kirby-demo-1`），並掛進 `cargo xtask ios`——忘記跑的懲罰是 App 靜默退回 `MockEngine`，那個症狀要花很久才認得出來。產物 gitignore，與 `assets/packs/` 同一條規則
+- `ColorApp.swift` 的 pack 路徑從 S0 遺留的 `mock-lineart.png` 改成 `dev.colorpack`——E1 起 `Engine::new` 真的解析格式，PNG 一定被 reject
+- 新增 shared scheme `ColorApp (rust)`：`-engine rust` 預設開啟、Run-only 無 testables。不直接翻開 `ColorApp` scheme 那條 argument，因為它的 TestAction 帶 `shouldUseLaunchSchemeArgsEnv`，會連 CI 的 host app 行為一起改
+- `CanvasScreen.DebugToolBar`（`#if DEBUG`）：筆刷／油漆桶切換 ＋ 六色票，選中狀態一律從 `engine.state.tool` 推導不留副本。沒有它就切不到油漆桶（`touchesBegan` 要 `state.tool` 是 `.bucket`），D4 與擴散動畫調校都做不了。刻意不做 size／opacity／筆刷切換——那些在 E2
+
 ## [v0.3] 2026-08-03
 
 **Render（E1）**

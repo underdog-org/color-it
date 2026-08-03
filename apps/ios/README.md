@@ -17,6 +17,7 @@ cargo xtask ios
 Generated/ColorlullEngine.xcframework   ← EngineBridge 連的靜態庫（arm64 device ＋ arm64 sim）
 Generated/Sources/colorlull_engine.swift ← 編進 EngineBridge target
 Generated/Headers/                       ← modulemap ＋ FFI header
+ColorApp/Resources/dev.colorpack         ← 開發用資產（順便 bake，見「換引擎」）
 ```
 
 沒跑就 build 的話會擋在兩個地方，兩個都是明確錯誤而不是一堆型別找不到：
@@ -44,15 +45,31 @@ EngineBridgeTests   unit test bundle
 每個 target 一個資料夾，全部掛 file-system synchronized group（Xcode 16+），
 所以**新增 Swift 檔完全不動 `project.pbxproj`**——它只在改 build setting 時才進 diff。
 
-## 換引擎
+## 換引擎（＝在真機上實際畫畫）
 
-預設 `MockEngine`。加 launch argument 切到真的 FFI：
+預設 `MockEngine`。要跑真的 FFI，**選 `ColorApp (rust)` 這支 scheme**——它就是
+`ColorApp` 加上 launch argument `-engine rust`，Run-only、沒有 testables。
 
+（`ColorApp` scheme 裡也有同一條 argument，預設關閉。不把它翻開是因為那支 scheme 的
+TestAction 帶 `shouldUseLaunchSchemeArgsEnv`，翻下去會連 CI 的 host app 行為一起改。）
+
+`-engine rust` 需要一顆真的 `.colorpack`：E1 起 `Engine::new` 會實際解析格式，
+S0 那顆「隨便一個存在的檔」已經餵不進去。`cargo xtask ios` 會順便 bake
+`ColorApp/Resources/dev.colorpack`（來源 `assets/source/kirby-demo-1`），要換素材：
+
+```bash
+cargo xtask dev-pack assets/source/torture-01
 ```
--engine rust
-```
 
-（shared scheme 裡已經有這一條，預設關閉，在 Xcode 的 scheme editor 勾起來即可。）
+這顆 pack 跟 `assets/packs/` 一樣**不進 git**（`architecture.md §12.2`）。
+沒 bake 就開 `-engine rust`，`EngineFactory` 的 `assertionFailure` 會直接說。
+
+**必須用真機。** `attach_surface` 要一個真的 `CAMetalLayer`；模擬器上 surface 建不起來，
+畫面會停在錯誤態（不 crash，這是 `E1-input §8` 的設計）。
+
+畫布下方那排工具／色票是 **Debug 建置限定的 E1 測試 harness**，不是產品 UI——
+`CanvasScreen.DebugToolBar`。沒有它就切不到油漆桶（`touchesBegan` 要 `state.tool`
+是 `.bucket` 才走 `tap()`，而預設是 `Brush`）。產品的工具列在 S1。
 
 Shell 程式碼一行不用改——選哪個實作是 `EngineFactory` 的事。這條路由
 `cargo xtask lint-ios` 守著：`apps/ios/ColorApp/**` 不得出現 `RustEngine`，

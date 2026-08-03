@@ -13,7 +13,7 @@ struct ColorApp: App {
     /// Shell 只認得 `any EngineProtocol`——選哪個實作是 `EngineFactory` 的事，
     /// 這裡看不到也不需要看到（`specs/ios-scaffold.md §6`，驗收「Shell 沒有任何一行
     /// 直接引用 `RustEngine`」）。
-    @State private var engine: any EngineProtocol = EngineFactory.make(packPath: mockPackPath)
+    @State private var engine: any EngineProtocol = EngineFactory.make(packPath: devPackPath)
 
     var body: some Scene {
         WindowGroup {
@@ -22,9 +22,13 @@ struct ColorApp: App {
         }
     }
 
-    /// S0 的 `-engine rust` 只需要「一個存在的檔」——引擎不解析內容（M1 才有格式）。
-    private static var mockPackPath: String? {
-        Bundle.main.path(forResource: "mock-lineart", ofType: "png")
+    /// E1 起引擎**真的**解析 `.colorpack`（`engine.rs` 的 `ColorPack::open`），
+    /// 所以 S0 那顆「隨便一個存在的檔」（`mock-lineart.png`）已經餵不進去了。
+    ///
+    /// 這個檔由 `cargo xtask ios`（或 `cargo xtask dev-pack`）bake 出來，**不進 git**。
+    /// 沒跑過就是 `nil` → `EngineFactory` 的 `assertionFailure` 會直接指出來。
+    private static var devPackPath: String? {
+        Bundle.main.path(forResource: "dev", ofType: "colorpack")
     }
 }
 

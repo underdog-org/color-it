@@ -17,14 +17,16 @@ import Foundation
 public enum EngineFactory {
     /// `-engine rust` 切到真的 FFI；其餘（含未指定）一律 `MockEngine`。
     ///
-    /// 預設是 Mock 而不是 Rust：S0 的 `RustEngine` 需要一個存在的 pack 檔，
-    /// 而 `.colorpack` 格式要到 M1 才有。
+    /// 預設仍是 Mock：Shell 的 UI 工作、preview 與單元測試都不該要求一顆 bake 好的
+    /// pack。真機手感測試（E1 D3／D4）才需要 `-engine rust`，做法見 `apps/ios/README.md`。
     public static func make(packPath: String?) -> any EngineProtocol {
         guard UserDefaults.standard.string(forKey: "engine") == "rust" else {
             return MockEngine()
         }
+        // 兩個 `assertionFailure` 都是刻意的：靜默退回 `MockEngine` 的症狀是
+        // 「畫得動但沒有線稿」，那要花很久才會被認出來不是引擎壞了。
         guard let packPath else {
-            assertionFailure("-engine rust 需要一個 pack 路徑")
+            assertionFailure("-engine rust 需要一顆 pack；先跑 `cargo xtask dev-pack`")
             return MockEngine()
         }
         do {

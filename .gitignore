@@ -2,6 +2,8 @@
 
 # baker 產物：走 R2，不進 git（architecture.md §12.2）
 /assets/packs/
+# 同一條規則：`cargo xtask ios` 複製進 bundle 的開發用 pack
+/apps/ios/ColorApp/Resources/*.colorpack
 
 # uniffi 產物：CI 每次重建，並由 `cargo xtask verify-generated` 檢查新鮮度
 /apps/ios/Generated/
