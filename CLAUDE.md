@@ -9,10 +9,13 @@ iOS 著色 App。核心是「**受區域約束的塗抹**」——不是繪圖�
 `core/stroke` 已落地 **§3–§6／§10**：One-Euro → 向心 Catmull-Rom → 弧長取樣 → `Dab`，`StrokeBuilder`
 串流版與 `generate_dabs` 批次版共用同一份實作，32 條測試無 GPU 全綠（三條 golden 標 `#[ignore]`，參數調校中）。
 `core/document` 已落地最小 apply（`Op`／`Effect`／`palette`／`colored_regions`，無 GPU），`core/render` 補上油漆桶那一列：`Transform::canvas_pos`＋`region_at`、`ErasePass`（`shaders/erase_clear.wgsl`）、`FillAnimator`＋`render_with_dt`。
-**下一步**：輸入與 FrameDriver（`E1-input`，含 `engine` 的 `tap` 接線）→ Pass 1／2（`E1-stroke §7`–`§9`）。
+**`E1-input` 已落地**：`RustEngine` 不再是 S0 mock——`new` 真的解析 `.colorpack`，`attach_surface`／`render`／`tap` 全部接到 `render`／`document`（`engine` 因此多一條 `colorpack` 依賴，`deps-policy.toml` 已改）；iOS 端加 `FrameDriver`（weak proxy ＋ `.common`）與 `InputAdapter`，`EngineCanvasView` 收全部 touch。Rust 16 條、iOS 24 條測試全綠。
+**下一步**：Pass 1／2（`E1-stroke §7`–`§9`）→ Mask Mode A／B 即時切換 → `E1-perf`。
+> `EngineError` 多了 `Surface` 變體（`attach_surface` 從「永遠 Ok」變成真的會失敗），遷移記錄在 `contracts.md ⑤`。
+> `E1-input.md §12` 是執行期決議（`tap` 由 `touchesBegan` 依工具分流、`radius` 送點不送像素、`Transform` 由 engine 自算 fit、iOS 測試 fixture 進 git）——動 Bridge 或 `engine` 之前先讀。
 > composite shader 的 `canvas_pos` 已改吃 `@builtin(position)`——UV 再乘一次 `screen_size` 會差一個 ulp，邊界像素會 floor 到隔壁區。
-> Pass 1／2 或 `engine` 接線動工前**先讀 `E1-stroke.md §14` 執行期決議**——`engine` → `stroke` 還不在 `deps-policy.toml` 裡。
-> `attach_surface` 需要真的 `CAMetalLayer`，無自動測試，等接上 iOS 端才驗得到。
+> Pass 1／2 動工前**先讀 `E1-stroke.md §14` 執行期決議**——`engine` → `stroke` 還不在 `deps-policy.toml` 裡。
+> `attach_surface` 需要真的 `CAMetalLayer`，無自動測試——模擬器上 `tap` 會落空（沒有 `region_ids`），真機才驗得到。
 > M0 交出第一份 `.colorpack` 之前，composite 與 `thumb.jpg` 的逐像素比對做不了（`E1-composite §9` 第 1 條）。
 
 > 產品原名 `Color It`，2026-08-03 因商標衝突改名 **Colorlull**（`docs/specs/naming.md`）。

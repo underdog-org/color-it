@@ -12,19 +12,26 @@ import XCTest
 @testable import EngineBridge
 
 final class EngineBridgeTests: XCTestCase {
-    /// S0 的 `RustEngine::new` 只檢查檔案存在，不解析內容（`.colorpack` 格式在 M1）。
+    /// `RustEngine::new` 從 E1 起真的解析 `.colorpack`（驗 `content_hash`、解 RLE、
+    /// 讀 `regions.json`），所以 S0 那個寫著 `"stub"` 的暫存檔不再管用。
+    ///
+    /// fixture 由 Rust 產生並進 git：
+    /// `cargo test -p colorlull-engine regenerate_ios_fixture -- --ignored`。
+    /// 它是否還跟得上 schema 由 `ios_fixture_still_matches_the_current_schema` 顧著。
     private var packPath: String!
+
+    /// fixture 的 region 數，見 `core/engine/src/engine.rs` 的 `TOTAL_REGIONS`。
+    private static let fixtureRegions: UInt32 = 2
 
     override func setUpWithError() throws {
         try super.setUpWithError()
-        let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("colorlull-\(UUID().uuidString).colorpack")
-        try Data("stub".utf8).write(to: url)
-        packPath = url.path
+        packPath = try XCTUnwrap(
+            Bundle(for: Self.self).url(forResource: "test", withExtension: "colorpack"),
+            "找不到 fixture——`cargo xtask ios` 之後請確認 Fixtures/ 有進測試 target"
+        ).path
     }
 
     override func tearDownWithError() throws {
-        try? FileManager.default.removeItem(atPath: packPath)
         packPath = nil
         try super.tearDownWithError()
     }
@@ -35,7 +42,11 @@ final class EngineBridgeTests: XCTestCase {
     /// modulemap 對上了、static slice 連上了、生成的 Swift 與 header 一致。
     func testAdapterInitSucceeds() throws {
         let adapter = try RustEngineAdapter(packPath: packPath)
-        XCTAssertEqual(adapter.state.progress, Progress(colored: 0, total: 24))
+        XCTAssertEqual(
+            adapter.state.progress,
+            Progress(colored: 0, total: Self.fixtureRegions),
+            "`total` 從 E1 起是資產包裡的真實 region 數"
+        )
     }
 
     /// 反向：路徑不存在時必須是 `EngineError.Pack`，不是 crash。
@@ -49,10 +60,23 @@ final class EngineBridgeTests: XCTestCase {
 
     // MARK: 2
 
-    func testTapAdvancesProgressThroughRealRust() throws {
+    /// **E1 起 `tap` 需要 GPU 資源**：`region_ids` 的唯一副本住在
+    /// `DocumentResources`，而它在 `attach_surface` 時才配置（`E1-wgpu §5.1`）。
+    /// 模擬器的單元測試沒有 `CAMetalLayer`，所以這裡驗的是「落空而不是 crash」。
+    ///
+    /// 有 surface 的那條路由 Rust 端的 `tap_fills_the_region_under_the_point`
+    /// 等四條在真 GPU 上顧著——那是它們該待的地方。
+    func testTapWithoutSurfaceIsANoop() throws {
         let adapter = try RustEngineAdapter(packPath: packPath)
         for _ in 0..<3 { adapter.tap(x: 1, y: 2) }
-        XCTAssertEqual(adapter.state.progress.colored, 3)
+        XCTAssertEqual(adapter.state.progress.colored, 0)
+    }
+
+    /// FFI 打得通、狀態確實會動——原本由 `tap` 擔任的角色改由 `setTool` 擔任。
+    func testStateRoundTripsThroughRealRust() throws {
+        let adapter = try RustEngineAdapter(packPath: packPath)
+        adapter.setTool(.eraser(size: 40))
+        XCTAssertEqual(adapter.state.tool, .eraser(size: 40))
     }
 
     // MARK: 3
@@ -70,19 +94,20 @@ final class EngineBridgeTests: XCTestCase {
             updated.fulfill()
         }
 
-        DispatchQueue.global().async { adapter.tap(x: 1, y: 2) }
+        // 用 `setTool` 而不是 `tap`：`tap` 沒有 surface 就不改變狀態，也就不 emit。
+        DispatchQueue.global().async { adapter.setTool(.eraser(size: 40)) }
 
         wait(for: [updated], timeout: 5)
         XCTAssertTrue(wasOnMain.value, "從背景 thread 觸發的回呼必須 hop 到 main 才賦值")
-        XCTAssertEqual(adapter.state.progress.colored, 1)
+        XCTAssertEqual(adapter.state.tool, .eraser(size: 40))
     }
 
     /// 已經在 main 上時走 fast path：同步賦值，不慢一個 runloop turn。
     func testMainThreadCallbackIsSynchronous() throws {
         let adapter = try RustEngineAdapter(packPath: packPath)
-        adapter.tap(x: 1, y: 2)
+        adapter.setTool(.eraser(size: 40))
         XCTAssertEqual(
-            adapter.state.progress.colored, 1,
+            adapter.state.tool, .eraser(size: 40),
             "main 上呼叫應同步更新，不得排到下一個 runloop turn"
         )
     }
@@ -95,7 +120,7 @@ final class EngineBridgeTests: XCTestCase {
         weak var weakAdapter: RustEngineAdapter?
         try autoreleasepool {
             let adapter = try RustEngineAdapter(packPath: packPath)
-            adapter.tap(x: 1, y: 2)
+            adapter.setTool(.eraser(size: 40))
             weakAdapter = adapter
             XCTAssertNotNil(weakAdapter)
         }
@@ -109,7 +134,8 @@ final class EngineBridgeTests: XCTestCase {
     /// 比對包含初始狀態，所以 `MockEngine` 的預設值必須逐欄位等於
     /// `core/app-state` 的 `AppState::default()`。
     func testMockAndRustProduceIdenticalStateSequences() throws {
-        let mock = MockEngine()
+        // Rust 端的 `total` 現在來自資產包，Mock 沒有 pack——所以由測試對齊兩者。
+        let mock = MockEngine(totalRegions: Self.fixtureRegions)
         let rust = try RustEngineAdapter(packPath: packPath)
 
         let sample = InputSample(
@@ -117,7 +143,8 @@ final class EngineBridgeTests: XCTestCase {
         )
         let operations: [(String, (any EngineProtocol) -> Void)] = [
             ("初始", { _ in }),
-            ("tap", { $0.tap(x: 10, y: 10) }),
+            // 兩個實作都必須落空：沒有 surface 就沒有 `region_ids`。
+            ("tap（未 attach）", { $0.tap(x: 10, y: 10) }),
             ("tap 再一次", { $0.tap(x: 20, y: 20) }),
             ("setTool marker", {
                 $0.setTool(.brush(
@@ -160,13 +187,24 @@ final class EngineBridgeTests: XCTestCase {
             )
         }
 
-        // 飽和行為也要一致。
+        // 沒有 surface 時「tap 不改變任何東西」也要一致。
         for _ in 0..<30 {
             mock.tap(x: 1, y: 1)
             rust.tap(x: 1, y: 1)
         }
         XCTAssertEqual(mock.state, rust.state)
-        XCTAssertEqual(mock.state.progress.colored, 24, "應飽和於 total")
+        XCTAssertEqual(mock.state.progress.colored, 0)
+    }
+
+    /// Mock 自己的飽和行為。`RustEngineAdapter` 那側要 GPU 才驗得到，
+    /// 由 Rust 的 `tap_fills_the_region_under_the_point` 顧著。
+    func testMockSaturatesProgressAtTotal() throws {
+        let mock = MockEngine(totalRegions: 3)
+        try mock.attachSurface(SurfaceHandle(layerPtr: 0, widthPx: 1, heightPx: 1, scale: 1))
+
+        for _ in 0..<10 { mock.tap(x: 1, y: 1) }
+
+        XCTAssertEqual(mock.state.progress, Progress(colored: 3, total: 3))
     }
 
     // MARK: 6

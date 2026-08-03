@@ -20,6 +20,18 @@
 - 回寫 `architecture.md` §4.5（`max_radius` 取四角最大距離、曲線與時長）與 §4.7（進度真相在 `document`）、`E1-composite.md §5`、`contracts.md` ②＋新增 C9（座標單位＝螢幕像素）
 - `engine` 的 `tap` 接線仍是 S0 mock，歸 `E1-input`
 
+**Input／FrameDriver（E1）**
+- `RustEngine` 不再是 S0 mock：`new` 真的解析 `.colorpack`（`total_regions` 與 `region_ids` 都從它來）、`attach_surface` 真的建 device／surface／`DocumentResources`、`render` 走 Pass 3、`tap` 走 `canvas_pos → region_at → document.apply → RenderContext::fill`
+- `EngineError::Surface` 新增——`attach_surface` 從「永遠 `Ok`」變成真的會失敗（`E1-wgpu §2.2`）；資產包壞了與 surface 建不起來，使用者能做的事不同
+- `deps-policy.toml` 加 `engine → colorpack`（方向仍只向下）
+- iOS 端 `FrameDriver`（weak proxy 破 `CADisplayLink` 的 retain cycle、runloop mode `.common`、80–120 Hz）與 `InputAdapter`（coalesced 在前預測在後、預測點每 frame 覆寫不累積、`t` 相對筆畫起點歸零、`radius`／`pressure` 兩條來源含 `maximumPossibleForce == 0` 的 NaN 防線）
+- `EngineCanvasView` 收全部 touch：`maximumDrawableCount = 2`、`onFrame` 順序 flush → `appendSamples` → `render`（**touch handler 內零次 render**）、attach 失敗顯示錯誤態而不 crash
+- **修正既有實作**：`attach()` 只在 `didMoveToWindow` 呼叫，而 SwiftUI 先掛上再排版——那一刻 `bounds` 是 0，於是永遠不 attach；`layoutSubviews` 補做。S0 沒發現是因為 `render()` 本來就是 no-op
+- `CanvasScreen.onTapGesture` 移除：它送未縮放的 UIKit point（`E1-bucket §4.1` 要求螢幕像素），且與 view 自己的 touch handling 競爭。`MockEngine` 的 `totalRegions` 改為建構參數、`tap` 未 attach 時落空（與 Rust 同一條時序）
+- iOS 測試 fixture `.colorpack` 進 git，由 `regenerate_ios_fixture` 產生；schema 漂移由 Rust 側的 `ios_fixture_still_matches_the_current_schema` 擋著
+- Rust 16 條、iOS 24 條測試全綠。`E1-input §10` 剩兩條要真機（ProMotion 120 Hz 實測、cancel 後 `T_paint` 逐像素不變）
+- 回寫 `architecture.md` §10.3（`MTKView` 待決項結案）、`contracts.md` ②／③（C10–C12）／⑤（`EngineError::Surface` 遷移記錄）、`E1-stroke.md` §9（濾波器狀態排除預測點）；八條實作期決議記在 `E1-input.md §12`
+
 **Stroke（E1）**
 - `core/stroke` 落地 `E1-stroke` §3–§6／§10：`Vec2`／`InputSample`／`Dab`／`Curve`／`BrushPreset` 十四欄＋五支 preset 登記、One-Euro（位置與 radius 各一組參數）、向心 Catmull-Rom（`alpha = 0.5`）、跨 segment 保留累積量的弧長取樣、`majorRadius` per-stroke 自適應正規化
 - **`StrokeBuilder`（串流）與 `generate_dabs`（批次）共用同一份實作**，§2.1 的等價因此由建構保證；等價與「同 seed 逐位元相同」設為 gate

@@ -22,11 +22,12 @@ import UIKit
 /// 包含第一個。
 @Observable
 public final class MockEngine: EngineProtocol {
-    /// `core/engine/src/inner.rs` 的 `MOCK_TOTAL_REGIONS`。M1 有 `.colorpack` 之後改成從資產包讀。
-    private static let mockTotalRegions: UInt32 = 24
-
     /// `AppState::default()` 的 `color`。
     private static let defaultColor = Rgba(r: 0x1a, g: 0x1a, b: 0x1a, a: 0xff)
+
+    /// Rust 端從 `.colorpack` 讀 region 數（E1 起），Mock 沒有 pack——所以由呼叫端給。
+    /// 預設值只是「一張圖大概有幾個區」，差分測試會傳 fixture 的真實值進來。
+    private let totalRegions: UInt32
 
     public private(set) var state: UiState
 
@@ -41,7 +42,13 @@ public final class MockEngine: EngineProtocol {
     /// stroke 狀態機**不在 `UiState`** 裡，所以維護它不會 emit。
     private var strokeActive = false
 
-    public init() {
+    /// `tap` 從 E1 起需要 GPU 上的 `region_ids`（`E1-wgpu §5.1`），沒有 surface
+    /// 就落空——Mock 沒有 region 的概念，但**這條時序必須一致**，否則差分測試
+    /// 會在「還沒 attach 就 tap」的情境下分歧。
+    private var attached = false
+
+    public init(totalRegions: UInt32 = 24) {
+        self.totalRegions = totalRegions
         state = UiState(
             tool: .brush(
                 preset: .softRound,
@@ -51,7 +58,7 @@ public final class MockEngine: EngineProtocol {
             ),
             canUndo: false,
             canRedo: false,
-            progress: Progress(colored: 0, total: MockEngine.mockTotalRegions)
+            progress: Progress(colored: 0, total: totalRegions)
         )
     }
 
@@ -76,7 +83,7 @@ public final class MockEngine: EngineProtocol {
             tool: tool,
             canUndo: false,
             canRedo: false,
-            progress: Progress(colored: coloredRegions, total: MockEngine.mockTotalRegions)
+            progress: Progress(colored: coloredRegions, total: totalRegions)
         )
     }
 
@@ -92,11 +99,19 @@ public final class MockEngine: EngineProtocol {
         }
     }
 
-    // MARK: Surface 生命週期（記都不記——S0 的 Mock 沒有 surface 概念）
+    // MARK: Surface 生命週期
+    //
+    // 只記「有沒有」，不碰 GPU。記這一個 bool 的理由見 `attached` 的註解。
 
-    public func attachSurface(_ handle: SurfaceHandle) throws {}
+    public func attachSurface(_ handle: SurfaceHandle) throws {
+        mutate { $0.attached = true }
+    }
+
     public func resizeSurface(widthPx: UInt32, heightPx: UInt32, scale: Float) {}
-    public func detachSurface() {}
+
+    public func detachSurface() {
+        mutate { $0.attached = false }
+    }
 
     // MARK: 工具與顏色
 
@@ -142,10 +157,13 @@ public final class MockEngine: EngineProtocol {
         mutate { $0.strokeActive = false }
     }
 
-    /// 推進 `colored`，飽和於 `mockTotalRegions`——對應 `AppState::mark_region_colored`。
+    /// 推進 `colored`，飽和於 `totalRegions`。
+    ///
+    /// 沒有 surface 就落空——Rust 端的理由是 `region_ids` 還沒配置（`E1-bucket §4.3`），
+    /// Mock 沒有那份資料，但要的是**同一條時序**。
     public func tap(x: Float, y: Float) {
         mutate { mock in
-            guard mock.coloredRegions < MockEngine.mockTotalRegions else { return }
+            guard mock.attached, mock.coloredRegions < mock.totalRegions else { return }
             mock.coloredRegions += 1
         }
     }

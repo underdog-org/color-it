@@ -35,7 +35,7 @@
 | 核心語言 | **Rust** | `uniffi` 自動產生 Swift + Kotlin binding，這是 FFI 邊界最大的省力點。記憶體安全對長時間執行的畫布狀態有實質價值 |
 | 圖形 API | **wgpu** | 薄 RHI，非 2D 引擎。一套 shader 打 **Metal + Vulkan** + GLES fallback（Android 舊機保命） |
 | Shader | **WGSL** | 單一來源，由 naga 編譯至各後端 |
-| iOS UI | **SwiftUI** ＋ `MTKView` | 原生手感、原生手勢、原生 IAP |
+| iOS UI | **SwiftUI** ＋ `CAMetalLayer` | 原生手感、原生手勢、原生 IAP。E1 定案不用 `MTKView`（`§10.3`） |
 | Android UI | **Compose** ＋ `SurfaceView` | 同上 |
 | 資產管線 | **Rust CLI**（`tools/baker`） | 與 runtime 共用 `colorpack` crate，格式定義不會漂移 |
 | 建置協調 | **`cargo xtask`** | Rust → iOS/Android 的產物生成流程複雜，需要單一入口 |
@@ -86,7 +86,7 @@
 │  ├─ EngineProtocol   介面定義（Shell 只依賴這個）               │
 │  ├─ RustEngine       真實實作                                  │
 │  ├─ MockEngine       假實作 ← 讓 Shell 可獨立開發               │
-│  ├─ CanvasView       MTKView          │  SurfaceView           │
+│  ├─ CanvasView       CAMetalLayer     │  SurfaceView           │
 │  ├─ InputAdapter     UITouch/Pencil   │  MotionEvent           │
 │  └─ FrameDriver      CADisplayLink    │  Choreographer         │
 ├══════════════ FFI（uniffi 由 Rust 生成）══════════════════════┤
@@ -705,7 +705,7 @@ fn export_timelapse(&self) -> Result<Vec<u8>>;
 
 **S0 對這份表面做了三處修正**（理由詳見 `specs/ffi-contract.md §3`）：
 
-1. **`new` 不吃 surface，拆出 `attach_surface` / `detach_surface`。** `MTKView` 的 layer 在 view 生命週期中會重建，re-attach 必須是正常路徑——重建 `Engine` 等於丟掉 undo stack 與未存檔狀態。附帶讓 `new` 能在無 GPU 環境跑，那是 headless 測試的前提。
+1. **`new` 不吃 surface，拆出 `attach_surface` / `detach_surface`。** view 的 `CAMetalLayer` 在生命週期中會重建，re-attach 必須是正常路徑——重建 `Engine` 等於丟掉 undo stack 與未存檔狀態。附帶讓 `new` 能在無 GPU 環境跑，那是 headless 測試的前提。
 2. **`subscribe` → `set_state_listener(Option<…>)`。** 名字誠實反映語意（單一 listener、後設覆蓋前設），`Option` 給了明確的 detach 路徑，否則 Swift 端的 retain cycle 無解。廣播給多個訂閱者是 Bridge 用 Combine 做的事。
 3. **fallible 界線定死**：只有 `new` / `attach_surface` / `save` / `export_*` 回 `Result`，其餘一律 infallible。`render()` 每 frame 呼叫，Swift 端不會想每 frame `try`。這條界線是契約的一部分，不因實作階段而挪動。
 
@@ -1367,7 +1367,7 @@ R_EPS = 4.0（點），實機調校
 
 渲染由 FrameDriver 驅動，**不由輸入事件驅動**。輸入事件只累積 sample，`render()` 每 frame 呼叫一次。
 
-> **E1 待決項：`MTKView` vs `CADisplayLink` ＋ `CAMetalLayer`。** `MTKView` 自帶一套 draw loop，與上一段「由 FrameDriver 驅動」是競爭機制。S0 的 `EngineCanvasView` 先用 `CAMetalLayer`（`§10.1` 提到的 `MTKView` 因此**尚未**採用），但這個取捨該由 E1 拿著真的 render pass 決定，不預先綁死。
+> **定案（E1）：`CAMetalLayer` ＋ 自建 `CADisplayLink`。`MTKView` 是退路。** 理由與退路的觸發條件見 `E1-input.md §1`——`MTKView` 自帶一套 draw loop，與上一段是競爭機制。落地細節（runloop mode `.common`、`preferredFrameRateRange`、weak proxy）在 `E1-input.md §2`。
 
 ---
 

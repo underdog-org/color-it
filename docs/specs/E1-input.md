@@ -1,6 +1,6 @@
 # E1 · 輸入與 FrameDriver
 
-> 狀態：草案（2026-08-03）｜里程碑：[E1](../roadmap/E1.md)｜計畫：[E1-spec-plan](./E1-spec-plan.md)
+> 狀態：**已落地**（2026-08-03）｜里程碑：[E1](../roadmap/E1.md)｜計畫：[E1-spec-plan](./E1-spec-plan.md)
 >
 > 唯一一份寫 Swift 的 E1 spec。演算法一律不在這裡——
 > `majorRadius` 正規化見 [E1-stroke](./E1-stroke.md) §5，逆變換與查表見 [E1-bucket](./E1-bucket.md) §4。
@@ -230,23 +230,44 @@ Pencil 的 `force` 初次送達時是估計值，稍後由 `touchesEstimatedProp
 
 ## 10. 驗收
 
-- [ ] `render()` 由 FrameDriver 呼叫，**touch handler 內零次** render 呼叫（以 log 或斷點驗）
-- [ ] 一 frame 內多個 touch 事件只產生一次 `appendSamples`（C3）
-- [ ] `EngineCanvasView` 移出 window 後 deinit——FrameDriver 無 retain cycle
-- [ ] Pencil 的樣本 `radius == 0`；手指的樣本 `radius > 0`
-- [ ] 不支援 force 的裝置上，Pencil 分支不產生 `NaN`
-- [ ] 連續畫 60 秒，`InputSample.t` 單調遞增且相鄰差值 > 0（f32 精度未塌陷）
-- [ ] 畫到一半按下 Home／來電 → `touchesCancelled` → `T_paint` 逐像素不變
-- [ ] 第二根手指落下不中斷第一筆，也不產生第二筆
-- [ ] ProMotion 裝置上 `CADisplayLink` 實測 120 Hz（`E1-perf` 取數）
+`EngineBridgeTests/InputTests.swift` 對應每一條打勾的項目。
+
+- [x] `render()` 由 FrameDriver 呼叫，**touch handler 內零次** render 呼叫
+- [x] 一 frame 內多個 touch 事件只產生一次 `appendSamples`（C3）
+- [x] `EngineCanvasView` 移出 window 後 deinit——FrameDriver 無 retain cycle
+- [x] Pencil 的樣本 `radius == 0`；手指的樣本 `radius > 0`
+- [x] 不支援 force 的裝置上，Pencil 分支不產生 `NaN`
+- [x] 連續畫 60 秒，`InputSample.t` 單調遞增且相鄰差值 > 0（f32 精度未塌陷）
+- [ ] 畫到一半按下 Home／來電 → `touchesCancelled` → `T_paint` 逐像素不變 ← 真機
+- [x] 第二根手指落下不中斷第一筆，也不產生第二筆
+- [ ] ProMotion 裝置上 `CADisplayLink` 實測 120 Hz（`E1-perf` 取數） ← 真機
 
 ## 11. 要回寫的既有文件
 
-| 文件 | 改什麼 |
-|---|---|
-| `E1-stroke.md §9` | `StrokeBuilder` 的濾波器狀態必須排除 `predicted` 樣本（§4） |
-| `contracts.md ②` | `attach_surface` 的 v0 狀態失效；補 C9（`radius == 0` = 觸控筆，`E1-stroke §2.2`）；補 C10（`InputSample.t` 相對筆畫起點，§4.1） |
-| `architecture.md §10.1` | `MTKView` → `CAMetalLayer` ＋ 自建 `CADisplayLink`（§1） |
-| `architecture.md §10.3` | 待決項結案（§1） |
-| `roadmap/E1.md` | 產出物與實作清單的「iOS 端 `MTKView`」→ `CAMetalLayer`（§1） |
-| `apps/ios/EngineBridge/EngineCanvasView.swift:14-17` | 註解的待決項結案（§8） |
+| 文件 | 改什麼 | |
+|---|---|---|
+| `E1-stroke.md §9` | `StrokeBuilder` 的濾波器狀態必須排除 `predicted` 樣本（§4） | ✅ |
+| `contracts.md ②` | `attach_surface` 的 v0 狀態失效；`new` / `tap` / `render` / `set_viewport` 的 v0 狀態一併失效 | ✅ |
+| `contracts.md ③` | 補 C10（`radius == 0` = 觸控筆）、C11（`t` 相對筆畫起點，§4.1）、C12（`radius` 的單位是點，§6） | ✅ |
+| `contracts.md ⑤` | `EngineError::Surface` 的遷移記錄 | ✅ |
+| `architecture.md §10.1` | `MTKView` → `CAMetalLayer` ＋ 自建 `CADisplayLink`（§1） | ✅ |
+| `architecture.md §10.3` | 待決項結案（§1） | ✅ |
+| `roadmap/E1.md` | 產出物與實作清單的「iOS 端 `MTKView`」→ `CAMetalLayer`（§1） | ✅ |
+| `apps/ios/EngineBridge/EngineCanvasView.swift:14-17` | 註解的待決項結案（§8） | ✅ |
+
+---
+
+## 12. 執行期決議（交接）
+
+實作時遇到、spec 沒答的問題。**後續 Agent 直接照這節做，不要重新發明。**
+
+| | 問題 | 決議 |
+|---|---|---|
+| A | `tap` 由誰呼叫？§3 的時機表只涵蓋 `beginStroke` / `appendSamples` / `endStroke` / `cancelStroke` | `EngineCanvasView.touchesBegan` 依 `engine.state.tool` 分流：`.bucket` → `tap` 並 return，其餘 → `beginStroke`。S0 的 `CanvasScreen.onTapGesture` 移除——它送未縮放的 UIKit point，且會與 view 自己的 touch handling 競爭 |
+| B | `radius` 要不要乘 `contentsScale`？§5 說「一律送螢幕像素」，§6 的程式碼卻沒乘 | **不乘，送點**。`E1-stroke §5` 明文 `R_EPS = 4.0`（點），而自適應正規化的分母是絕對量，換單位不會被約掉。這是 C9 的記名例外，已補為 C12 |
+| C | `Transform` 誰來設？Swift 端沒有呼叫 `setViewport` 的時機 | `engine` 在 `attach_surface` / `resize_surface` 內自算 `Transform::fit`。E1 沒有縮放平移（`E1-composite §4`），`set_viewport` 保留給 E2 |
+| D | `EngineError` 沒有適合 surface 失敗的變體，`Pack` 語意不對 | 新增 `EngineError::Surface`。使用者能做的事不同：資產包壞了要重下載，surface 失敗是裝置／時機問題 |
+| E | `attach()` 只在 `didMoveToWindow` 呼叫，而 SwiftUI 是先掛上再排版——那一刻 `bounds` 是 0，於是永遠不 attach | `layoutSubviews` 在未 attach 且已進 window 時補做一次。S0 沒發現是因為 `render()` 本來就是 no-op |
+| F | `RustEngine::new` 真的解析 pack 之後，`EngineBridgeTests` 那個寫著 `"stub"` 的暫存檔失效 | fixture 由 Rust 產生並**進 git**（`apps/ios/EngineBridgeTests/Fixtures/test.colorpack`）——zip 容器與 `content_hash` 的實作只存在於 Rust，Swift 端重寫一份就違反「一份契約只能存在一次」。schema 漂移由 `ios_fixture_still_matches_the_current_schema` 擋在 Rust 這側 |
+| G | `MockEngine.tap` 無條件推進進度，而 Rust 端未 attach 時落空——差分測試會分歧 | Mock 記一個 `attached` bool，未 attach 時 `tap` 落空。Mock 沒有 region 的概念，但**時序必須一致**。`totalRegions` 同時改成建構參數（Rust 從 pack 讀，Mock 沒有 pack） |
+| H | §10 有三條在單元測試裡驗不到 | ProMotion 實測 120 Hz、motion-to-photon、`touchesCancelled` 後 `T_paint` 逐像素不變——三條都要真機 ＋ 真 GPU，歸 `E1-perf` 與人工驗收。已在 `InputTests.swift` 的檔頭記名 |

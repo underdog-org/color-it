@@ -8,9 +8,12 @@ import SwiftUI
 
 /// 空殼 ＋ 引擎給的畫布 view。
 ///
-/// `tap` 是 S0 唯一會改變 `UiState` 的操作，所以進度那行就是驗收
-/// 「`tap()` 能驅動 progress 變化並反映到 UI」的地方——`engine.state` 讀取被
-/// observation tracking 記錄，Mock 或 Adapter 更新 `state` 時這個 view 自己重畫。
+/// **輸入由 `EngineCanvasView` 自己收**（`E1-input §3`／`§8`），Shell 不接手勢：
+/// `tap` 與 `InputSample` 一律送螢幕像素，而乘 `contentsScale` 需要 layer——
+/// S0 的 `.onTapGesture` 送的是未縮放的 UIKit point，E1 起是錯的。
+///
+/// 進度那行仍然是「`tap()` 能驅動 progress 變化並反映到 UI」的驗收點——
+/// `engine.state` 讀取被 observation tracking 記錄，引擎更新 `state` 時這個 view 自己重畫。
 struct CanvasScreen: View {
     let assetID: String
 
@@ -19,9 +22,6 @@ struct CanvasScreen: View {
     var body: some View {
         VStack(spacing: 16) {
             EngineCanvas(engine: engine)
-                .onTapGesture { point in
-                    engine.tap(x: Float(point.x), y: Float(point.y))
-                }
 
             Text("\(engine.state.progress.colored) / \(engine.state.progress.total)")
                 .monospacedDigit()

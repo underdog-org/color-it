@@ -36,7 +36,9 @@ internal = ["colorpack", "oplog"]
 [crates.app-state]
 
 [crates.engine]
-internal = ["app-state", "document", "history", "render"]
+# `colorpack` 是 E1 加的：`new` 要真的 `ColorPack::open`，而 `attach_surface`
+# 要把同一份 pack 交給 `render`。方向仍然只向下（`engine` 在最上層）。
+internal = ["app-state", "colorpack", "document", "history", "render"]
 
 # ── 工具 ──────────────────────────────────────────────────────────
 

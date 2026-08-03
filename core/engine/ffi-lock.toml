@@ -3,4 +3,4 @@
 # （.swift / FFI.h / module.modulemap），不含 .xcframework。
 # 這裡的 diff 即「FFI 表面變了」，請順手確認 docs/contracts.md 有跟上。
 uniffi = "0.29.5"
-swift_sources_sha256 = "ed48d6035097cfc7fe9abeab797a10498a7339026bcea5f0cd3ffc89005e7f92"
+swift_sources_sha256 = "0f0a4fa1a54f19a636f7d979de5f1cf05f851c16ef713094d848e3ad0fbb4922"

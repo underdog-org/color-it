@@ -1,15 +1,20 @@
 //! FFI facade：生命週期、鎖與 DTO 轉換。**沒有業務邏輯**。
 //!
-//! S0 是 headless mock，行為表見 `docs/specs/ffi-contract.md §5`。
+//! 業務邏輯住 `document`（狀態）與 `render`（GPU）。本檔只做三件事：
+//! 把 FFI 的 DTO 翻成 core 的型別、在同一把鎖底下協調兩者、把 `Effect` 翻成 GPU 動作。
+//! 行為表見 `docs/specs/ffi-contract.md §5`，E1 的接線見 `docs/specs/E1-bucket.md §3`。
 
-use std::path::Path;
+use std::fs::File;
+use std::io::BufReader;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
-use app_state::AppState;
+use colorpack::ColorPack;
+use document::{Effect, Op};
+use render::{Frame, SurfaceHandle as RenderSurfaceHandle, encode};
 
 use crate::error::EngineError;
 use crate::ffi::{InputSample, Rgba, SurfaceHandle, Tool, Transform, UiState};
-use crate::inner::{Inner, MOCK_TOTAL_REGIONS};
+use crate::inner::{CANVAS_BACKGROUND, Inner};
 use crate::listener::StateListener;
 
 /// 未實作的 infallible 方法用它報一次到——不是 panic、不是回傳錯誤。
@@ -57,36 +62,69 @@ impl RustEngine {
             listener.on_state(state);
         }
     }
+
+    /// 測試專用：不經過 surface 就把 GPU 與文件資源建起來。
+    ///
+    /// 正式路徑只有 `attach_surface` 一條（`E1-wgpu §2`），而它需要真的
+    /// `CAMetalLayer`。`tap` 這條線要驗，就得有另一個入口——但**只在測試存在**，
+    /// 不進 FFI 表面。
+    #[cfg(test)]
+    fn prepare_gpu(&self) -> Result<(), render::RenderError> {
+        let mut inner = self.lock();
+        let Inner { render, pack, .. } = &mut *inner;
+        render.prepare_document(pack)
+    }
 }
 
 #[uniffi::export]
 impl RustEngine {
-    /// S0 只檢查 `pack_path` 存在，不解析 `.colorpack`（格式在 M1）。
+    /// 真的解析 `.colorpack`——`total_regions` 與 `region_ids` 都從這裡來。
     ///
-    /// 不吃 surface：`new` 因此能在無 GPU 的環境跑，那是 headless mock 與 CI
-    /// 單元測試的前提（契約 C5）。
+    /// **不吃 surface**：`new` 因此能在無 GPU 的環境跑，那是 headless 測試與
+    /// 「App 啟動不必等 GPU」的前提（契約 C5）。GPU 初始化的唯一時機是
+    /// `attach_surface`（`E1-wgpu §2`）。
     #[uniffi::constructor]
     pub fn new(pack_path: String, doc_path: Option<String>) -> Result<Arc<Self>, EngineError> {
+        // 存檔在 E3；E1 每次都從 pack 的初始狀態開始。
         let _ = doc_path;
 
-        if !Path::new(&pack_path).exists() {
-            return Err(EngineError::Pack {
-                detail: format!("找不到資產包：{pack_path}"),
-            });
-        }
+        let file = File::open(&pack_path).map_err(|e| EngineError::Pack {
+            detail: format!("開不了資產包 {pack_path}：{e}"),
+        })?;
+        let pack = ColorPack::open(BufReader::new(file)).map_err(|e| EngineError::Pack {
+            detail: format!("{pack_path}：{e}"),
+        })?;
 
-        let app = AppState {
-            total_regions: MOCK_TOTAL_REGIONS,
-            ..AppState::default()
-        };
         Ok(Arc::new(Self {
-            inner: Mutex::new(Inner::new(app)),
+            inner: Mutex::new(Inner::new(pack)),
         }))
     }
 
+    /// **E1 起真的會失敗**（`E1-wgpu §2.2`）：adapter 取不到、device 建不出來、
+    /// surface 格式不支援。失敗時 `surface` 維持 `None`，畫作仍在 engine 裡——
+    /// Swift 端顯示錯誤態即可，不需要 crash（`E1-input §8`）。
     pub fn attach_surface(&self, handle: SurfaceHandle) -> Result<(), EngineError> {
-        self.mutate(|inner| inner.surface = Some(handle));
-        Ok(())
+        let mut result = Ok(());
+        self.mutate(|inner| {
+            let target = RenderSurfaceHandle {
+                layer_ptr: handle.layer_ptr,
+                width_px: handle.width_px,
+                height_px: handle.height_px,
+                scale: handle.scale,
+            };
+            match unsafe { inner.render.attach_surface(target, &inner.pack) } {
+                Ok(()) => {
+                    inner.surface = Some(handle);
+                    inner.refit();
+                }
+                Err(e) => {
+                    result = Err(EngineError::Surface {
+                        detail: e.to_string(),
+                    });
+                }
+            }
+        });
+        result
     }
 
     pub fn resize_surface(&self, width_px: u32, height_px: u32, scale: f32) {
@@ -96,11 +134,17 @@ impl RustEngine {
                 surface.height_px = height_px;
                 surface.scale = scale;
             }
+            inner.render.resize_surface(width_px, height_px);
+            inner.refit();
         });
     }
 
+    /// **只丟 surface。** device 與文件資源留著——切出 App 再回來，畫作還在（契約 C5）。
     pub fn detach_surface(&self) {
-        self.mutate(|inner| inner.surface = None);
+        self.mutate(|inner| {
+            inner.surface = None;
+            inner.render.detach_surface();
+        });
     }
 
     pub fn set_tool(&self, tool: Tool) {
@@ -133,10 +177,41 @@ impl RustEngine {
         self.mutate(|inner| inner.stroke_active = false);
     }
 
+    /// 油漆桶。`x` / `y` 是**螢幕像素**（`E1-bucket §4.1`），乘 `contentsScale`
+    /// 是 Bridge 的責任。
+    ///
+    /// 三步：逆變換 → region ID → `document.apply`。`document` 回的 `Effect` 才被
+    /// 翻成 GPU 動作——**`document` 不認得 `render`**（`E1-bucket §3`），中間永遠隔著這裡。
+    ///
+    /// 沒有 GPU 資源時（尚未 `attach_surface`）落空：`region_ids` 的唯一副本住在
+    /// `DocumentResources`（`E1-wgpu §5.1`），engine 不另開一份。畫面都還沒有的
+    /// 時候填色也無從看見。
     pub fn tap(&self, x: f32, y: f32) {
-        let _ = (x, y);
         self.mutate(|inner| {
-            inner.app.mark_region_colored();
+            let canvas = inner.transform.canvas_pos([x, y]);
+            // 畫布外 → `None`，不 clamp（`E1-bucket §4.3`）。
+            let Some(region_id) = inner.render.resources().and_then(|r| r.region_at(canvas)) else {
+                return;
+            };
+
+            let op = Op::Fill {
+                region_id,
+                color: inner.app.color,
+            };
+            // 同色重填與不存在的 ID 都回 `Effect::None`——什麼都不做，也不 emit。
+            let Effect::Filled {
+                region_id,
+                color,
+                prev,
+                bbox,
+            } = inner.doc.apply(op)
+            else {
+                return;
+            };
+
+            // 進度是 `document` 的投影，不是第二份計數器。
+            inner.app.colored_regions = inner.doc.colored_regions();
+            inner.render.fill(region_id, color, prev, bbox, canvas);
         });
     }
 
@@ -148,13 +223,32 @@ impl RustEngine {
         log_once!("[colorlull] redo 尚未實作（排程 E3），本次為 no-op");
     }
 
+    /// 由 FrameDriver 每 frame 呼叫（`E1-input §2.1`），所以 infallible——
+    /// Swift 端不會想每 frame `try`。掉 frame 與取不到 drawable 都不是錯誤，
+    /// 由 `render` 內部吸收。
+    ///
+    /// E1 只有 Pass 3 Composite；Pass 1／2 由 `E1-stroke` 插在它前面。
     pub fn render(&self) {
-        log_once!("[colorlull] render 尚未實作（排程 E1），本次為 no-op");
+        self.mutate(|inner| {
+            let frame = Frame {
+                transform: inner.transform,
+                screen_size: inner.screen_size(),
+                background: CANVAS_BACKGROUND,
+                // 進行中筆畫的顏色。Pass 1 還沒接上時 `T_wet` 恆為空，
+                // 這個值不影響畫面，但先送對的東西省得 E1-stroke 再找一次。
+                brush_color: encode(inner.app.color),
+            };
+            if let Err(e) = inner.render.render(frame) {
+                log_once!("[colorlull] render 失敗（僅報一次）：{e}");
+            }
+        });
     }
 
+    /// E1 的 transform 由 `attach` / `resize` 自己算 fit-to-screen，這支是 E2
+    /// 縮放平移的入口。**畫布逆變換的真相在 Rust**，Swift 端不另存一份
+    /// （`E1-input §5`）。
     pub fn set_viewport(&self, transform: Transform) {
-        let _ = transform;
-        log_once!("[colorlull] set_viewport 尚未實作（排程 E1），本次為 no-op");
+        self.mutate(|inner| inner.transform = transform.into());
     }
 
     pub fn state(&self) -> UiState {
@@ -186,19 +280,89 @@ mod tests {
     use std::sync::{Mutex, Weak, mpsc};
     use std::time::Duration;
 
+    use colorpack::manifest::{Aspect, Category, Difficulty, Manifest};
+    use colorpack::region::RegionEntry;
+
     use super::*;
     use crate::ffi::{BrushId, Progress};
 
-    fn engine() -> Arc<RustEngine> {
+    /// fixture 的畫布：4×4，左兩欄是 region 0、右兩欄是 region 1。
+    const CANVAS: u32 = 4;
+    const TOTAL_REGIONS: u32 = 2;
+
+    fn temp_path(tag: &str) -> std::path::PathBuf {
         static SEQ: AtomicU32 = AtomicU32::new(0);
-        let path = std::env::temp_dir().join(format!(
-            "colorlull-s0-{}-{}.colorpack",
+        std::env::temp_dir().join(format!(
+            "colorlull-{tag}-{}-{}.colorpack",
             std::process::id(),
             SEQ.fetch_add(1, Ordering::Relaxed)
-        ));
-        std::fs::write(&path, b"stub").unwrap();
+        ))
+    }
+
+    /// 最小但**合法**的 `.colorpack`：`ColorPack::open` 會驗 `content_hash`，
+    /// 而 `DocumentResources` 會真的去解線稿 PNG——兩者都糊弄不過去。
+    fn write_pack(path: &std::path::Path) {
+        let region_ids: Vec<u16> = (0..CANVAS * CANVAS)
+            .map(|i| u16::from(i % CANVAS >= CANVAS / 2))
+            .collect();
+        let regions = (0..TOTAL_REGIONS)
+            .map(|id| RegionEntry {
+                id,
+                centroid: [0, 0],
+                area: (CANVAS * CANVAS / 2),
+                bbox: [id * CANVAS / 2, 0, CANVAS / 2, CANVAS],
+                suggested_color: "#FFFFFF".to_owned(),
+            })
+            .collect();
+
+        let mut pack = ColorPack {
+            manifest: Manifest {
+                schema_version: "1.0".to_owned(),
+                id: "engine-test".to_owned(),
+                content_hash: String::new(),
+                canvas_size: [CANVAS, CANVAS],
+                aspect: Aspect::Square,
+                region_count: TOTAL_REGIONS,
+                difficulty: Difficulty::Easy,
+                category: Category::Animal,
+                has_shade: false,
+                palette: vec![],
+            },
+            regions,
+            region_ids,
+            lineart_png: transparent_png(CANVAS, CANVAS),
+            shade_png: None,
+            thumb_jpg: vec![],
+        };
+        pack.write_to(std::fs::File::create(path).unwrap()).unwrap();
+    }
+
+    fn transparent_png(w: u32, h: u32) -> Vec<u8> {
+        let mut out = Vec::new();
+        let mut encoder = png::Encoder::new(&mut out, w, h);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder.write_header().unwrap();
+        writer
+            .write_image_data(&vec![0u8; (w * h * 4) as usize])
+            .unwrap();
+        writer.finish().unwrap();
+        out
+    }
+
+    fn engine() -> Arc<RustEngine> {
+        let path = temp_path("engine");
+        write_pack(&path);
         let engine = RustEngine::new(path.to_string_lossy().into_owned(), None).unwrap();
         std::fs::remove_file(&path).unwrap();
+        engine
+    }
+
+    /// `tap` 需要 `DocumentResources` 才有 `region_ids`，而正式路徑只有
+    /// `attach_surface` 一條——它要真的 `CAMetalLayer`。這裡走測試專用的入口。
+    fn engine_with_gpu() -> Arc<RustEngine> {
+        let engine = engine();
+        engine.prepare_gpu().expect("需要可用的 GPU");
         engine
     }
 
@@ -301,31 +465,111 @@ mod tests {
         assert_eq!(recorder.seen().len(), 1);
     }
 
+    /// iOS 測試 fixture 的相對路徑。**進 git**——它是 `EngineBridgeTests` 唯一能
+    /// 拿到合法 `.colorpack` 的方式（zip 容器 ＋ `content_hash` 的實作只存在於
+    /// Rust，Swift 端重寫一份就違反「一份契約只能存在一次」）。
+    const IOS_FIXTURE: &str = "../../apps/ios/EngineBridgeTests/Fixtures/test.colorpack";
+
+    /// 重新產生 iOS 的 fixture。schema 版本或容器格式改了才需要跑：
+    ///
+    /// ```text
+    /// cargo test -p colorlull-engine regenerate_ios_fixture -- --ignored
+    /// ```
     #[test]
-    fn tap_advances_progress_and_saturates() {
-        let engine = engine();
+    #[ignore = "產生檔案，不是驗證"]
+    fn regenerate_ios_fixture() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(IOS_FIXTURE);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        write_pack(&path);
+    }
+
+    /// checked-in 的 fixture 會隨著 schema 演進而失效，而失效的症狀出現在
+    /// Xcode 裡（7 條 Swift 測試同時紅），離原因很遠。這條把它拉回 Rust 這側。
+    #[test]
+    fn ios_fixture_still_matches_the_current_schema() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(IOS_FIXTURE);
+        let engine = RustEngine::new(path.to_string_lossy().into_owned(), None)
+            .expect("fixture 過期了，跑 `regenerate_ios_fixture -- --ignored` 重新產生");
+
+        assert_eq!(engine.state().progress.total, TOTAL_REGIONS);
+    }
+
+    /// `total` 現在是資產包裡的真實 region 數，不再是 mock 常數。
+    #[test]
+    fn total_regions_comes_from_the_pack() {
+        assert_eq!(
+            engine().state().progress,
+            Progress {
+                colored: 0,
+                total: TOTAL_REGIONS
+            }
+        );
+    }
+
+    #[test]
+    fn new_rejects_a_file_that_is_not_a_pack() {
+        let path = temp_path("garbage");
+        std::fs::write(&path, b"stub").unwrap();
+        let result = RustEngine::new(path.to_string_lossy().into_owned(), None);
+        std::fs::remove_file(&path).unwrap();
+
+        assert!(matches!(result, Err(EngineError::Pack { .. })));
+    }
+
+    #[test]
+    fn new_rejects_a_missing_pack() {
+        assert!(matches!(
+            RustEngine::new("/nonexistent.colorpack".to_owned(), None),
+            Err(EngineError::Pack { .. })
+        ));
+    }
+
+    /// 一次 tap ＝ 一次 `document.apply`，進度是 `document` 的投影。
+    #[test]
+    fn tap_fills_the_region_under_the_point() {
+        let engine = engine_with_gpu();
         let recorder = Arc::new(Recorder::default());
         engine.set_state_listener(Some(recorder.clone()));
 
-        engine.tap(1.0, 2.0);
-        assert_eq!(
-            engine.state().progress,
-            Progress {
-                colored: 1,
-                total: MOCK_TOTAL_REGIONS
-            }
-        );
+        // 左半：region 0。
+        engine.tap(0.5, 0.5);
+        assert_eq!(engine.state().progress.colored, 1);
+
+        // 右半：region 1。
+        engine.tap(3.5, 0.5);
+        assert_eq!(engine.state().progress.colored, TOTAL_REGIONS);
+        assert_eq!(recorder.seen().len(), 2);
+    }
+
+    /// 同色重填回 `Effect::None`——狀態沒變，所以不 emit（契約 C8）。
+    #[test]
+    fn tapping_the_same_region_twice_changes_nothing() {
+        let engine = engine_with_gpu();
+        let recorder = Arc::new(Recorder::default());
+        engine.set_state_listener(Some(recorder.clone()));
+
+        engine.tap(0.5, 0.5);
+        engine.tap(1.5, 3.5); // 同一區的另一點
+        assert_eq!(engine.state().progress.colored, 1);
         assert_eq!(recorder.seen().len(), 1);
+    }
 
-        for _ in 1..MOCK_TOTAL_REGIONS {
-            engine.tap(1.0, 2.0);
-        }
-        assert_eq!(engine.state().progress.colored, MOCK_TOTAL_REGIONS);
-        assert_eq!(recorder.seen().len(), MOCK_TOTAL_REGIONS as usize);
+    /// 畫布外**不 clamp**（`E1-bucket §4.3`）——clamp 會讓誤觸填到邊緣區域。
+    #[test]
+    fn tap_outside_the_canvas_does_nothing() {
+        let engine = engine_with_gpu();
 
-        engine.tap(1.0, 2.0);
-        assert_eq!(engine.state().progress.colored, MOCK_TOTAL_REGIONS);
-        assert_eq!(recorder.seen().len(), MOCK_TOTAL_REGIONS as usize);
+        engine.tap(-1.0, 0.5);
+        engine.tap(0.5, CANVAS as f32 + 1.0);
+        assert_eq!(engine.state().progress.colored, 0);
+    }
+
+    /// 還沒 `attach_surface` 就 tap：`region_ids` 還不存在，落空而不是 panic。
+    #[test]
+    fn tap_before_attach_is_a_noop() {
+        let engine = engine();
+        engine.tap(0.5, 0.5);
+        assert_eq!(engine.state().progress.colored, 0);
     }
 
     #[test]
@@ -372,13 +616,33 @@ mod tests {
 
         engine.undo();
         engine.redo();
+        // 沒有 surface 時 `render` 直接回 `Ok`——資源都還在（契約 C5）。
         engine.render();
+        engine.detach_surface();
+    }
+
+    /// `set_viewport` 覆寫 fit-to-screen 的結果，而 `tap` 的逆變換吃的就是它。
+    #[test]
+    fn set_viewport_moves_the_tap_target() {
+        let engine = engine_with_gpu();
+
+        // 放大兩倍並右移：螢幕 (5, 1) 落在畫布 (2.5, 0.5)，即右半的 region 1。
+        engine.set_viewport(Transform {
+            scale: 2.0,
+            tx: 0.0,
+            ty: 0.0,
+        });
+        engine.tap(5.0, 1.0);
+        assert_eq!(engine.state().progress.colored, 1);
+
+        // 同一個螢幕座標，在恆等變換下落在畫布外——什麼都不該發生。
         engine.set_viewport(Transform {
             scale: 1.0,
             tx: 0.0,
             ty: 0.0,
         });
-        engine.detach_surface();
+        engine.tap(5.0, 1.0);
+        assert_eq!(engine.state().progress.colored, 1);
     }
 
     /// 契約 C8。

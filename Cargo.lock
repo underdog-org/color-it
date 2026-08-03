@@ -473,9 +473,11 @@ name = "colorlull-engine"
 version = "0.1.0"
 dependencies = [
  "colorlull-app-state",
+ "colorlull-colorpack",
  "colorlull-document",
  "colorlull-history",
  "colorlull-render",
+ "png",
  "thiserror",
  "uniffi",
 ]

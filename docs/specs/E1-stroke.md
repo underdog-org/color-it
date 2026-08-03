@@ -250,6 +250,11 @@ E1 沒有 undo，所以收尾只有第 1 步。
 但 `T_wet` 是累積的，`Max` blend 下已畫上去的預測 dab 抹不掉——
 若直接 commit，筆畫的尾端會比使用者實際抬筆處長出一截。
 
+**濾波器狀態也必須排除預測點**（`E1-input §4` 的回寫）。One-Euro 是有狀態的，
+讓預測點更新 `x_prev` / `dx_prev`，下一個真實樣本的濾波就建立在猜測上，而誤差會
+就此留在筆畫裡。§14 決議 H 的 `predicted_dabs`（複製一份 builder 算完就丟）
+結構上已經滿足這件事——`StrokeBuilder::push` 只吃真實樣本。
+
 **解法：`end_stroke` 時先重建 `T_wet`。**
 
 ```
@@ -318,7 +323,8 @@ bbox 大小的暫存層、每 frame 清掉，再與 `T_wet` 一起合成。
 | `architecture.md §5.3` | 輸入處理鏈補「向心」與「radius 另一組濾波參數」（§4） | ✅ |
 | `architecture.md §10.2` | 自適應正規化補 per-stroke 的已知限制與 `R_EPS`（§5）；baseline 初值是 `r ± R_EPS/2` 的帶狀，不是 `r`（決議 F） | ✅ |
 | `E1-composite.md §3` | `T_paint` 是 premultiplied alpha，第 ③ 層的 `over()` 要對應（§8） | Pass 2 落地時 |
-| `contracts.md` ③ | 補 C9：`radius == 0` 表示觸控筆，`> 0` 表示手指（§2.2） | 修正窗口在 E2／E3 |
+| `contracts.md` ③ | 補 C9：`radius == 0` 表示觸控筆，`> 0` 表示手指（§2.2） | ✅（`E1-input` 一併補了 C10） |
+| 本文 §9 | 濾波器狀態必須排除 `predicted` 樣本（`E1-input §4`） | ✅ |
 
 ---
 

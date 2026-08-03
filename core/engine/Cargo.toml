@@ -15,8 +15,13 @@ workspace = true
 
 [dependencies]
 colorlull-app-state = { workspace = true }
+colorlull-colorpack = { workspace = true }
 colorlull-document = { workspace = true }
 colorlull-history = { workspace = true }
 colorlull-render = { workspace = true }
 thiserror = { workspace = true }
 uniffi = { workspace = true }
+
+[dev-dependencies]
+# fixture 的 `.colorpack` 要有真的能解碼的線稿——`render` 端會真的去解它。
+png = { workspace = true }

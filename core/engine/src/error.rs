@@ -13,6 +13,13 @@ pub enum EngineError {
     #[error("資產包載入失敗：{detail}")]
     Pack { detail: String },
 
+    /// `attach_surface` 專屬。S0 永遠回 `Ok`，**E1 起真的會失敗**
+    /// （`E1-wgpu §2.2`）——adapter 取不到、device 建不出來、surface 格式不支援。
+    /// 與 `Pack` 分開是因為使用者能做的事不同：資產包壞了要重下載，
+    /// surface 失敗則是裝置／時機問題，畫作還在 engine 裡。
+    #[error("繪圖表面建立失敗：{detail}")]
+    Surface { detail: String },
+
     #[error("I/O 失敗：{detail}")]
     Io { detail: String },
 }

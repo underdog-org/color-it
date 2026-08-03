@@ -144,7 +144,7 @@ impl RustEngine {
 ### 對 `§6 Boundary 1` 的三處修正
 
 **1. `Engine::new(surface, …)` 拆成兩段。**
-uniffi 傳不了 raw pointer 是表面理由，真正的理由有兩個：`MTKView` 的 layer 在 view
+uniffi 傳不了 raw pointer 是表面理由，真正的理由有兩個：`CAMetalLayer` 在 view
 生命週期中會重建，兩段式讓 re-attach 是正常路徑，而不是重建 `RustEngine`——重建 `RustEngine`
 等於丟掉 undo stack 與未存檔狀態，那是 bug 不是設計；其次，`new` 因此能在無 GPU 的環境跑，
 這是 headless mock 與 CI 單元測試的前提。
@@ -165,7 +165,7 @@ buffer——兩者不相容。**v0 維持同步簽章**，接受抬筆時約一 
 
 ### 不進 FFI
 
-`makeCanvasView()` 只存在於 Swift 側——它是 Bridge 包 `MTKView` 並呼叫 `attach_surface`
+`makeCanvasView()` 只存在於 Swift 側——它是 Bridge 包 `CAMetalLayer` 並呼叫 `attach_surface`
 的地方。`contracts.md` 要明講這個歸屬，否則「逐一對照無缺漏」的驗收會誤判它是缺漏。
 
 ## 4. `core/engine` 內部形狀
