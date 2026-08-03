@@ -209,7 +209,8 @@ public final class MockEngine: EngineProtocol {
     /// **Debug 建置會蓋一條浮水印。** 這個 view 沒有 `touchesBegan` 也沒有 render loop，
     /// 所以跑錯引擎的症狀是「畫面看起來正常，但手指碰下去毫無反應」——那看起來像
     /// stroke 管線壞了，而不是像選錯 scheme。標出來的成本遠低於再查一次。
-    public func makeCanvasView() -> UIView {
+    /// `pickMode` 用不上——這個 view 不吃觸控。
+    public func makeCanvasView(pickMode: CanvasPickMode) -> UIView {
         let view = UIImageView(image: UIImage(named: "mock-lineart"))
         view.contentMode = .scaleAspectFit
         view.backgroundColor = .systemBackground

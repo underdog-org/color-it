@@ -3,9 +3,9 @@
 iOS 著色 App。核心是「**受區域約束的塗抹**」——不是繪圖軟體。
 單人開發，v1 只有 iOS，38 週零 buffer。
 
-**當前**：M0／M1／S0 / E1 已經完成
+**當前**：M0／M1／S0／E1 已完成；S1 進行中（第一塊「設計系統 ＋ Gallery ＋ Canvas UI」已落地，見 `specs/S1-ios-ui.md`）
 
-**真機測試**：`cargo xtask ios` 會順便 bake `apps/ios/ColorApp/Resources/dev.colorpack`（gitignore），Xcode 選 `ColorApp (rust)` scheme 跑真 FFI；畫布下方是 Debug 限定的工具／色票列（切油漆桶用，`CanvasScreen.DebugToolBar`，不是產品 UI）。模擬器不行——`attach_surface` 要真的 `CAMetalLayer`。做法見 `apps/ios/README.md`。
+**真機測試**：`cargo xtask ios` 會順便 bake `apps/ios/ColorApp/Resources/dev.colorpack`（gitignore），Xcode 選 `ColorApp (rust)` scheme 跑真 FFI；S1 起畫布用的是**產品 UI**（`DebugToolBar` 已刪），Gallery 頂端另有 Debug 限定的假資料場景切換列。模擬器不行——`attach_surface` 要真的 `CAMetalLayer`。做法見 `apps/ios/README.md`。
 
 **M0 色標交付（`specs/baker-seeds.md`）已完成**：交付改成 `lineart` ＋ `seeds.png`，區域由線稿封閉區決定；`flats.png`／`reference.png` 與 `migrate.rs` 已刪，`assets-spec.md` 升到 v2.0（§0 可整段複製進 JD）。
 

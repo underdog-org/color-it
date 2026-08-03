@@ -169,7 +169,7 @@ public final class RustEngineAdapter: EngineProtocol {
 
     // MARK: Bridge 專屬
 
-    public func makeCanvasView() -> UIView {
-        EngineCanvasView(engine: self)
+    public func makeCanvasView(pickMode: CanvasPickMode) -> UIView {
+        EngineCanvasView(engine: self, pickMode: pickMode)
     }
 }

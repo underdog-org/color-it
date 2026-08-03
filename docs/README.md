@@ -19,6 +19,7 @@
 | [specs/E2-brush.md](./specs/E2-brush.md) | 三張 tip、五支 preset 的差異軸、velocity 啟用、RNG 契約與 golden（**里程碑期間有效，收尾後刪除**） | 264 行 |
 | [specs/S1-ios-ui.md](./specs/S1-ios-ui.md) | 設計稿收尾、Design Tokens、Gallery 資料層契約、Canvas 接引擎（**里程碑期間有效，收尾後刪除**） | 248 行 |
 | [perf-baseline.md](./perf-baseline.md) | **效能量測方法 ＋ 實測數字**：m2p 流程、對帳、D2／D3／D4 劇本、調校記錄 | 短 |
+| [interface-defects.md](./interface-defects.md) | FFI 表面的缺口與 Shell 的繞法，附修正窗口（S1 起） | 短 |
 | [contracts.md](./contracts.md) | FFI 的**現況**：表面速查表、語意條款 C1–C13、semver 判定、遷移記錄 | 短 |
 
 `roadmap/` 已全部拆檔，一次只讀需要的那一份。
@@ -61,6 +62,7 @@
 | 動 Xcode 專案、`EngineBridge`、五條路由、Swift 測試 | `apps/ios/README.md` |
 | 某方法現在到底做了什麼、Swift Bridge 能假設什麼 | `contracts.md` ② ③ ★ |
 | FFI 改動算 major 還是 minor、遷移怎麼記 | `contracts.md` ④ ⑤ |
+| Shell 為了繞過 FFI 缺口多寫了什麼 | `interface-defects.md` |
 | 效能目標、量測 | `§13` 效能觀測 ＋ `perf-baseline.md` |
 | 風險與退路 | `§14` |
 

@@ -24,7 +24,7 @@ import UIKit
 /// |---|---|
 /// | `new(pack_path, doc_path)` | 建構不是抽象的一部分——`MockEngine()` 沒有 pack。對應 `RustEngineAdapter.init(packPath:docPath:)` |
 /// | `set_state_listener(opt)` | 它是**實作 `state` 的手段**，不是 Shell 的介面。Shell 要的是「狀態會自己更新」 |
-/// | `makeCanvasView()` | 反向：Bridge 有、FFI 沒有（`docs/contracts.md` C7 已授權） |
+/// | `makeCanvasView(pickMode:)` | 反向：Bridge 有、FFI 沒有（`docs/contracts.md` C7 已授權） |
 public protocol EngineProtocol: AnyObject {
     /// 對應 FFI 的 `state()`。兩個實作都是 `@Observable`，所以 view 經
     /// `any EngineProtocol` 讀這個欄位就會被 observation tracking 記錄，
@@ -82,5 +82,5 @@ public protocol EngineProtocol: AnyObject {
     // MARK: Bridge 專屬
 
     /// `docs/contracts.md` C7：不在 FFI 表面上，對照表上不算缺漏。
-    func makeCanvasView() -> UIView
+    func makeCanvasView(pickMode: CanvasPickMode) -> UIView
 }

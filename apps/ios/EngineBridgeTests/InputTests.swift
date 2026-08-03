@@ -71,7 +71,7 @@ final class InputTests: XCTestCase {
     func testViewDeallocatesDespiteDisplayLink() {
         weak var weakView: EngineCanvasView?
         autoreleasepool {
-            let view = EngineCanvasView(engine: SpyEngine())
+            let view = EngineCanvasView(engine: SpyEngine(), pickMode: CanvasPickMode())
             weakView = view
             // 不進 window 也建得起 driver——retain cycle 若存在就在 init 那一刻成形。
             XCTAssertNotNil(weakView)
@@ -120,7 +120,7 @@ final class InputTests: XCTestCase {
     /// `systemUptime` 的量級直接送 `f32` 會塌成 0.03 秒解析度（§4.1）。
     func testTimestampsAreRelativeToStrokeStartAndStayMonotonic() {
         let adapter = InputAdapter()
-        let view = EngineCanvasView(engine: SpyEngine())
+        let view = EngineCanvasView(engine: SpyEngine(), pickMode: CanvasPickMode())
         let uptime: TimeInterval = 432_000 // 開機五天
 
         let first = touch(at: .zero, timestamp: uptime)
@@ -210,14 +210,14 @@ final class InputTests: XCTestCase {
 
     private func makeView() -> (EngineCanvasView, SpyEngine) {
         let spy = SpyEngine()
-        let view = EngineCanvasView(engine: spy)
+        let view = EngineCanvasView(engine: spy, pickMode: CanvasPickMode())
         view.frame = CGRect(x: 0, y: 0, width: 200, height: 200)
         return (view, spy)
     }
 
     private func firstSample(from touch: StubTouch) -> InputSample {
         let adapter = InputAdapter()
-        let view = EngineCanvasView(engine: SpyEngine())
+        let view = EngineCanvasView(engine: SpyEngine(), pickMode: CanvasPickMode())
         return adapter.begin(touch, in: view)!
     }
 
@@ -326,5 +326,5 @@ final class SpyEngine: EngineProtocol {
     func exportPNG() throws -> Data { Data() }
     func exportTimelapse() throws -> Data { Data() }
 
-    func makeCanvasView() -> UIView { UIView() }
+    func makeCanvasView(pickMode: CanvasPickMode) -> UIView { UIView() }
 }

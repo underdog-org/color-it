@@ -46,7 +46,7 @@ S0 驗收「`EngineProtocol.swift` 與 Rust FFI 表面逐一對照無缺漏」�
 | `export_timelapse()` | ✅ | `engine.rs` | `Err(NotImplemented { milestone: "E3" })` |
 
 fallible 的界線是契約的一部分，不因 S0 是 mock 而挪動——`render()` 每 frame 呼叫，
-Swift 端不會想每 frame `try`。表上沒有 `makeCanvasView()`，那是 Bridge 的東西（見 C7）。
+Swift 端不會想每 frame `try`。表上沒有 `makeCanvasView(pickMode:)`，那是 Bridge 的東西（見 C7）。
 
 **Swift 對應**：上表除三項外全部一對一出現在 `apps/ios/EngineBridge/EngineProtocol.swift`
 （名稱照 uniffi 的 camelCase，`export_png` → `exportPNG`）。三個記名的例外——
@@ -56,7 +56,7 @@ Swift 端不會想每 frame `try`。表上沒有 `makeCanvasView()`，那是 Bri
 |---|---|
 | `new(pack_path, doc_path)` | `RustEngineAdapter.init(packPath:docPath:)`。建構不是抽象的一部分——`MockEngine()` 沒有 pack |
 | `set_state_listener(opt)` | 無。它是**實作 `state` 的手段**，不是 Shell 的介面；Shell 要的是「狀態會自己更新」 |
-| 無 | `makeCanvasView()`。反向：Bridge 有、FFI 沒有（C7） |
+| 無 | `makeCanvasView(pickMode:)`。反向：Bridge 有、FFI 沒有（C7） |
 
 **生成的 Swift 名字**：`RustEngine`（class）＋ `RustEngineProtocol`（uniffi 自動生的）。
 後者與手寫的 `EngineProtocol.swift` 是**兩個不同的東西**，前者簽章跟著 Rust 走、
@@ -75,7 +75,7 @@ Swift 端不會想每 frame `try`。表上沒有 `makeCanvasView()`，那是 Bri
 | C4 | `predicted: true` 的樣本只影響當前 frame，不進 oplog |
 | C5 | `RustEngine` 生命週期長於 surface；`attach` / `detach` 是正常路徑，重建 `RustEngine` 等於丟失狀態 |
 | C6 | `pick_color` 同步回傳，接受抬筆時約一 frame 的 stall（S1 實作時複審） |
-| C7 | `makeCanvasView()` 屬 Bridge（包 `CAMetalLayer` 並呼叫 `attach_surface`），不在 FFI——對照表上不算缺漏 |
+| C7 | `makeCanvasView(pickMode:)` 屬 Bridge（包 `CAMetalLayer` 並呼叫 `attach_surface`），不在 FFI——對照表上不算缺漏。`CanvasPickMode` 同理：吸管待命不改引擎狀態，所以不進 `UiState`（S1） |
 | C8 | `UiState` 回呼只在投影結果**真的改變**時發送；連續兩次相同狀態只會收到一次 |
 | C9 | `tap` / `begin_stroke` / `pick_color` 的座標單位是**螢幕像素**，不是 UIKit point——乘 `contentsScale` 是 Bridge 的責任 |
 | C10 | `InputSample.radius == 0` 表示**觸控筆**、`> 0` 表示手指。Pencil 的 `majorRadius` 也有值，所以那個 0 是 Bridge **主動寫入的語意**，不是缺值 |

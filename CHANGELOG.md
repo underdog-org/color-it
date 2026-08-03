@@ -12,6 +12,16 @@
 - `properties.rs` 加五條 RNG 契約與速度的 property test，**現在就是 CI gate**（與參數值無關，不必等 D5）
 - golden fixture 從 3 個擴到 15 個（3 條軌跡 × 5 支），fixture 記下 preset 名。**`#[ignore]` 仍在**——解除排在 D5 參數定案之後，提前解只會再標回去；另加一條不 ignore 的測試守著「15 個檔案都在」
 - `architecture.md §4.6` 的十四欄數值表改為定性的差異軸表：數值的唯一真相是 `preset.rs`，寫進文件就是寫完即過期
+**Tokens & UI（S1）**
+- `DesignTokens.swift`：`.pen` document variables 的逐項對譯（顏色／品牌色／間距／圓角／字級／字型）。手工同步，`.pen` 是加密格式做不出產生器
+- Fraunces ＋ Inter（OFL variable font）bundle 進 App。`UIAppFonts` 是陣列型別、沒有 `INFOPLIST_KEY_` 寫法，所以補了 `apps/ios/ColorApp-Info.plist`——刻意放在 `ColorApp/` **之外**，該資料夾是 file-system synchronized group，擺進去會與 `ProcessInfoPlistFile` 撞成 "Multiple commands produce Info.plist"
+- `EngineBridge/Gallery/`：`GalleryItem` / `GalleryCatalog` / `FixtureCatalog`。鎖定收斂成 `isLocked(isSubscribed:)` 一行；「未下載 × 有本機文件」由 `init` 的 assert 排除，另兩個不可能組合由 `isLocked` 的定義保證
+- `DownloadState` 補 `.failed(reason:)`——設計稿的 `Card States · Download` 畫了重試態，spec §2.1 原本漏了。合法組合因此是 20 個，`FixtureCatalog.populated` 逐一涵蓋並由測試比對
+- Gallery 兩分頁、六個元件、Canvas 全面改寫（Top Bar 進度條、工具列、筆刷展開層、兩排刻度、常駐色環、色票列、完成建議膠囊）
+- 吸管接上 `pickColor`：新增 Bridge 專屬的 `CanvasPickMode`，`makeCanvasView(pickMode:)` 取代無參數版。待命與否不改引擎狀態，所以不進 `UiState`
+- `CanvasScreen.DebugToolBar` 已刪，真機測試改用產品 UI；`MaskModeToggle` 保留（綁 D4 不綁本輪）
+- **回寫 `prd.md`**：§5.1／§5.2 進度環 → 線性進度條；§5.2 完整色盤入口由常駐色環滿足；§5.2 Canvas 沒有 Settings 入口
+- 新增 `docs/interface-defects.md`，第一條：`Tool.eraser` 沒有 `color` 欄位，Shell 只能自己保存當前色（修正窗口 E3）
 
 **修正（E1）**
 - `RenderContext::attach_surface` 建 surface 的那一段抽成 cfg 分岔的 `create_metal_surface`：`SurfaceTargetUnsafe::CoreAnimationLayer` 是 wgpu 的 `#[cfg(metal)]` variant，非 Apple 平台不存在，CI 的 Linux job 因此整個 workspace 編不過。非 Apple 版本回新的 `RenderError::UnsupportedPlatform`。注意 metal 那一支在 CI 上沒有任何 job 會編到（`ios` job 的 paths-filter 不含 `core/render/**`）

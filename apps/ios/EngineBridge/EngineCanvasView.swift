@@ -18,6 +18,7 @@ public final class EngineCanvasView: UIView, FrameDriverTarget {
     public override class var layerClass: AnyClass { CAMetalLayer.self }
 
     private let engine: any EngineProtocol
+    private let pickMode: CanvasPickMode
     private let input = InputAdapter()
     private var driver: FrameDriver?
     private var attached = false
@@ -26,8 +27,9 @@ public final class EngineCanvasView: UIView, FrameDriverTarget {
     /// （`E1-wgpu §2.2`／`E1-input §8`）。
     private var errorLabel: UILabel?
 
-    public init(engine: any EngineProtocol) {
+    public init(engine: any EngineProtocol, pickMode: CanvasPickMode) {
         self.engine = engine
+        self.pickMode = pickMode
         super.init(frame: .zero)
         isOpaque = true
         // §7 的「只追蹤第一根」由 UIKit 保證，`InputAdapter` 是第二道防線。
@@ -84,6 +86,17 @@ public final class EngineCanvasView: UIView, FrameDriverTarget {
 
     public override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
         guard let touch = touches.first else { return }
+
+        // 吸管待命：這一下取色，不塗抹也不填色，取完自動解除。
+        if pickMode.isArmed {
+            let point = touch.preciseLocation(in: self)
+            let pixelScale = layer.contentsScale
+            pickMode.picked = engine.pickColor(
+                x: Float(point.x * pixelScale), y: Float(point.y * pixelScale)
+            )
+            pickMode.isArmed = false
+            return
+        }
 
         // 油漆桶不是筆畫：O(1) 的一次填色，不經過 stroke 狀態機。
         // 座標乘 `contentsScale` 在這裡做——`tap` 收**螢幕像素**（`E1-bucket §4.1`）。

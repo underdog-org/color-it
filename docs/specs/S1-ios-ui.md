@@ -78,7 +78,8 @@ public struct GalleryItem: Identifiable, Hashable {
     public let difficulty: Difficulty      // .easy / .medium / .focus
     public let regionCount: UInt32
     public let entitlement: Entitlement    // .free / .paid
-    public let download: DownloadState     // .notDownloaded / .downloading(Double) / .downloaded
+    public let download: DownloadState     // .notDownloaded / .downloading(Double)
+                                           // / .downloaded / .failed(reason: String?)
     public let work: WorkState?            // nil＝未開始
     public let lastEditedAt: Date?
 }
@@ -136,6 +137,9 @@ public protocol GalleryCatalog: AnyObject {
 ### 2.4 `FixtureCatalog`
 
 以 `Scenario` enum 切換，對應 `Gallery States` 畫的三張加一張完整態：
+
+`.failed` 是本輪補的：設計稿的 `Card States · Download` 畫了它（按鈕變重試、`$accent` 著色），
+原本的 §2.1 漏了。組合空間因此是 2 × 4 × 3 扣掉 4 個「未下載 × 有文件」＝ **20 個**。
 
 | Scenario | 用途 |
 |---|---|
@@ -238,11 +242,11 @@ Undo/Redo 無可復原步驟時**只降階為停用，不隱藏**——避免按
 
 ## 6. 完成定義
 
-- [ ] `.pen` 四項收尾完成（§0.1）
-- [ ] App 內可切 `Scenario`，看到全部合法卡片狀態組合與三個空狀態
-- [ ] 三工具切換、兩排刻度、Undo/Redo 停用態、吸管取色全部走 `EngineProtocol`
-- [ ] `DebugToolBar` 已刪，真機測試改用產品 UI
-- [ ] `DesignTokens.swift` 與 `.pen` 變數逐項一致（§3 的表就是核對清單）
-- [ ] Gallery → Canvas → 實際塗抹 → 返回，全流程在真機可用
-- [ ] `prd.md` 三處回寫完成（§0.2）
-- [ ] 介面缺陷清單開檔，第一條已記錄（§4.2）
+- [x] `.pen` 四項收尾完成（§0.1）
+- [x] App 內可切 `Scenario`，看到全部合法卡片狀態組合與三個空狀態
+- [x] 三工具切換、兩排刻度、Undo/Redo 停用態、吸管取色全部走 `EngineProtocol`
+- [x] `DebugToolBar` 已刪，真機測試改用產品 UI
+- [x] `DesignTokens.swift` 與 `.pen` 變數逐項一致（§3 的表就是核對清單）
+- [ ] Gallery → Canvas → 實際塗抹 → 返回，全流程在真機可用　←　**待真機驗證**
+- [x] `prd.md` 三處回寫完成（§0.2）
+- [x] 介面缺陷清單開檔，第一條已記錄（§4.2）

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  只放 `GENERATE_INFOPLIST_FILE` 產不出來的鍵。其餘（scene manifest、launch screen、
+  orientations）仍由 build settings 的 `INFOPLIST_KEY_*` 生成後**合併**進這份檔案，
+  所以這裡不重複列。
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>UIAppFonts</key>
+	<array>
+		<string>Inter.ttf</string>
+		<string>Fraunces.ttf</string>
+	</array>
+</dict>
+</plist>

@@ -19,6 +19,11 @@ Colorlull 的 iOS app。Xcode 骨架（S0）已完工，專案決策與陷阱記
   CI 加 `CODE_SIGNING_ALLOWED=NO`（runner 沒有憑證）
 - 依賴鏈：`ColorApp` → `EngineBridge.framework` → `ColorlullEngine.xcframework`（link 不 embed）。
   每個 target 一個資料夾，file-system synchronized group（Xcode 16+），新增 Swift 檔不動 pbxproj
+- **`ColorApp-Info.plist` 刻意放在 `ColorApp/` 之外**（S1）：`UIAppFonts` 是陣列，沒有
+  `INFOPLIST_KEY_` 寫法，只能用實體 plist；而 `ColorApp/` 是 synchronized group，
+  擺進去會被自動加進 Copy Bundle Resources，與 `ProcessInfoPlistFile` 撞成
+  "Multiple commands produce Info.plist"。`GENERATE_INFOPLIST_FILE` 仍是 YES，生成的鍵會合併進來
+- 字型（Fraunces／Inter，OFL variable font）在 `ColorApp/DesignSystem/Fonts/`，授權書同放
 
 ## 前置步驟：先跑一次 `cargo xtask ios`
 
