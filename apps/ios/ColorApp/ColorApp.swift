@@ -22,11 +22,6 @@ struct ColorApp: App {
         }
     }
 
-    /// E1 起引擎**真的**解析 `.colorpack`（`engine.rs` 的 `ColorPack::open`），
-    /// 所以 S0 那顆「隨便一個存在的檔」（`mock-lineart.png`）已經餵不進去了。
-    ///
-    /// 這個檔由 `cargo xtask ios`（或 `cargo xtask dev-pack`）bake 出來，**不進 git**。
-    /// 沒跑過就是 `nil` → `EngineFactory` 的 `assertionFailure` 會直接指出來。
     private static var devPackPath: String? {
         Bundle.main.path(forResource: "dev", ofType: "colorpack")
     }
