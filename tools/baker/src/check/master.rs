@@ -2,12 +2,11 @@
 
 use colorpack::Aspect;
 
-use crate::binarize::MAX_LINE_RATIO;
 use crate::compose::luma;
 use crate::image::Image;
 use crate::report::{Coords, Diagnostic, Stage, code};
-use crate::seeds::{MIN_SEED_AREA, Seed};
-use crate::segment::{Grown, MIN_ORPHAN_AREA, Orphan};
+use crate::seeds::Seed;
+use crate::segment::{Grown, Orphan};
 
 /// 母帶長邊。
 pub const MASTER_LONG_EDGE: u32 = 4096;
@@ -66,8 +65,8 @@ pub fn color_space(images: &[(&str, &Image)]) -> Vec<Diagnostic> {
 
 /// 線像素佔比過高的警告（§4.1）。獨立成一條：它必須在 `grow` 之前就報出來，
 /// 因為門檻不對時後面每一條診斷都會是雜訊。
-pub fn line_coverage(ratio: f32) -> Vec<Diagnostic> {
-    if ratio <= MAX_LINE_RATIO {
+pub fn line_coverage(ratio: f32, max_ratio: f32) -> Vec<Diagnostic> {
+    if ratio <= max_ratio {
         return Vec::new();
     }
     vec![Diagnostic::warning(
@@ -77,7 +76,7 @@ pub fn line_coverage(ratio: f32) -> Vec<Diagnostic> {
             "線像素佔畫布 {:.1}%，超過 {:.0}%。\
              lineart 應該是透明底、只有線本身不透明——白底交付會讓整張都判成線",
             ratio * 100.0,
-            MAX_LINE_RATIO * 100.0
+            max_ratio * 100.0
         ),
     )]
 }
@@ -86,13 +85,19 @@ pub fn line_coverage(ratio: f32) -> Vec<Diagnostic> {
 ///
 /// **一次全報**（§4.4）：繪師補一條線交一次、補一個點又交一次是不能接受的，
 /// 所以這裡沒有任何提早退出。
-pub fn seeds(seeds: &[Seed], grown: &Grown, orphans: &[Orphan]) -> Vec<Diagnostic> {
+pub fn seeds(
+    seeds: &[Seed],
+    grown: &Grown,
+    orphans: &[Orphan],
+    min_seed_area: u32,
+    min_orphan_area: u32,
+) -> Vec<Diagnostic> {
     let mut out = Vec::new();
     let anchor = |id: u32| seeds[id as usize].anchor;
 
     let mut small = Coords::master();
     let mut smallest = u32::MAX;
-    for s in seeds.iter().filter(|s| s.solid_area < MIN_SEED_AREA) {
+    for s in seeds.iter().filter(|s| s.solid_area < min_seed_area) {
         smallest = smallest.min(s.solid_area);
         small.push(s.anchor.0, s.anchor.1);
     }
@@ -102,7 +107,7 @@ pub fn seeds(seeds: &[Seed], grown: &Grown, orphans: &[Orphan]) -> Vec<Diagnosti
                 code::SEED_TOO_SMALL,
                 Stage::Master,
                 format!(
-                    "{} 個色標的不透明面積不足 {MIN_SEED_AREA}px（最小的只有 {smallest}px），\
+                    "{} 個色標的不透明面積不足 {min_seed_area}px（最小的只有 {smallest}px），\
                      取不出可靠的建議色。把點畫大一點，直徑約 16px 以上",
                     small.total()
                 ),
@@ -164,7 +169,7 @@ pub fn seeds(seeds: &[Seed], grown: &Grown, orphans: &[Orphan]) -> Vec<Diagnosti
                 format!(
                     "{} 個封閉區沒有色標（最大一處 {}px），漏點了。\
                      **一個封閉區一個點，不是一個顏色一個點**——\
-                     線稿把一片顏色切成幾塊，就要點幾個點。門檻 {MIN_ORPHAN_AREA}px",
+                     線稿把一片顏色切成幾塊，就要點幾個點。門檻 {min_orphan_area}px",
                     coords.total(),
                     orphans[0].area
                 ),
@@ -211,6 +216,9 @@ pub fn shade(shade_white: &[u8], width: u32) -> Vec<Diagnostic> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::binarize::MAX_LINE_RATIO;
+    use crate::seeds::MIN_SEED_AREA;
+    use crate::segment::MIN_ORPHAN_AREA;
 
     fn image(w: u32, h: u32, rgba: Vec<u8>) -> Image {
         Image {
@@ -253,7 +261,7 @@ mod tests {
             area: 900,
             anchor: (50, 50),
         }];
-        let out = seeds(&list, &grown(vec![(1, 2)], vec![3]), &orphans);
+        let out = seeds(&list, &grown(vec![(1, 2)], vec![3]), &orphans, MIN_SEED_AREA, MIN_ORPHAN_AREA);
 
         let codes: Vec<&str> = out.iter().map(|d| d.code).collect();
         assert!(codes.contains(&code::SEED_TOO_SMALL), "{codes:?}");
@@ -267,7 +275,7 @@ mod tests {
     #[test]
     fn a_collision_reports_both_anchors_as_a_pair() {
         let list = [seed_at(1, 1, 999), seed_at(7, 3, 999)];
-        let out = seeds(&list, &grown(vec![(0, 1)], Vec::new()), &[]);
+        let out = seeds(&list, &grown(vec![(0, 1)], Vec::new()), &[], MIN_SEED_AREA, MIN_ORPHAN_AREA);
         let d = out.iter().find(|d| d.code == code::SEED_COLLISION).unwrap();
         assert_eq!(d.coords, vec![(1, 1), (7, 3)]);
     }
@@ -285,7 +293,7 @@ mod tests {
                 anchor: (1, 1),
             },
         ];
-        let out = seeds(&[], &grown(Vec::new(), Vec::new()), &orphans);
+        let out = seeds(&[], &grown(Vec::new(), Vec::new()), &orphans, MIN_SEED_AREA, MIN_ORPHAN_AREA);
         let d = out.iter().find(|d| d.code == code::ORPHAN_AREA).unwrap();
         assert_eq!(d.coords, vec![(9, 9), (1, 1)]);
         assert!(d.message.contains("9000px"), "{}", d.message);
@@ -295,16 +303,16 @@ mod tests {
     #[test]
     fn a_clean_asset_produces_no_seed_diagnostics() {
         let list = [seed_at(1, 1, 999)];
-        assert!(seeds(&list, &grown(Vec::new(), Vec::new()), &[]).is_empty());
+        assert!(seeds(&list, &grown(Vec::new(), Vec::new()), &[], MIN_SEED_AREA, MIN_ORPHAN_AREA).is_empty());
     }
 
     /// 白底交付的線稿：alpha 全滿 → 整張都判成線。這是 `line-coverage` 的唯一用途。
     #[test]
     fn an_opaque_lineart_is_a_coverage_warning_not_an_error() {
-        let out = line_coverage(1.0);
+        let out = line_coverage(1.0, MAX_LINE_RATIO);
         assert_eq!(out[0].code, code::LINE_COVERAGE);
         assert_eq!(out[0].severity, crate::report::Severity::Warning);
-        assert!(line_coverage(MAX_LINE_RATIO).is_empty(), "門檻上不報");
+        assert!(line_coverage(MAX_LINE_RATIO, MAX_LINE_RATIO).is_empty(), "門檻上不報");
     }
 
     #[test]

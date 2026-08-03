@@ -66,6 +66,8 @@ fn bake(dir: &Path, out: Option<PathBuf>, report_json: Option<PathBuf>) -> Resul
     let opts = baker::BakeOptions {
         out_dir: out.unwrap_or_else(|| root.join("assets/packs")),
         report_json,
+        // `cargo xtask bake` 一律走契約預設值；要調參數請直接跑 baker --set。
+        params: baker::Params::default(),
     };
     let report = baker::bake(dir, &opts)?;
     print!("{}", report.to_text());

@@ -29,11 +29,70 @@ use colorpack::{ColorPack, Manifest, RegionEntry};
 use crate::image::{Image, PngOptions};
 use crate::report::{Report, Summary, code};
 
+/// `baker-seeds.md §3.3` 的四個參數。預設值是契約的一部分——真要調就等於改契約，
+/// 全量重烘是應該的。
+///
+/// **尚未納入 `content_hash`**：`content_hash` 由 pack entries 算出（`colorpack::ColorPack::write_to`），
+/// 刻意排除 `manifest.json`，而 §「`.colorpack` 格式一律不動」擋掉了新增 hashed entry 這條路
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Params {
+    pub line_threshold: u8,
+    pub min_seed_area: u32,
+    pub min_orphan_area: u32,
+    pub max_line_ratio: f32,
+}
+
+impl Default for Params {
+    fn default() -> Self {
+        Self {
+            line_threshold: binarize::DEFAULT_LINE_THRESHOLD,
+            min_seed_area: seeds::MIN_SEED_AREA,
+            min_orphan_area: segment::MIN_ORPHAN_AREA,
+            max_line_ratio: binarize::MAX_LINE_RATIO,
+        }
+    }
+}
+
+impl Params {
+    pub const KEYS: [&'static str; 4] = [
+        "line_threshold",
+        "min_seed_area",
+        "min_orphan_area",
+        "max_line_ratio",
+    ];
+
+    /// `--set key=value` 的解析。認不得的 key 直接報錯並列出四個合法值——
+    /// 打錯字卻靜默套用預設是最難查的那種 bug。
+    pub fn set(&mut self, key: &str, value: &str) -> Result<()> {
+        let bad = |what: &str| {
+            anyhow::anyhow!("--set {key}={value}：{value:?} 不是合法的 {what}")
+        };
+        match key {
+            "line_threshold" => self.line_threshold = value.parse().map_err(|_| bad("u8"))?,
+            "min_seed_area" => self.min_seed_area = value.parse().map_err(|_| bad("u32"))?,
+            "min_orphan_area" => self.min_orphan_area = value.parse().map_err(|_| bad("u32"))?,
+            "max_line_ratio" => {
+                let v: f32 = value.parse().map_err(|_| bad("f32"))?;
+                if !(0.0..=1.0).contains(&v) {
+                    anyhow::bail!("--set max_line_ratio={value}：必須落在 0.0–1.0");
+                }
+                self.max_line_ratio = v;
+            }
+            _ => anyhow::bail!(
+                "--set 認不得的參數 {key:?}，可用的是：{}",
+                Self::KEYS.join(" / ")
+            ),
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct BakeOptions {
     /// 預設 `assets/packs/`（gitignore，走 R2）。
     pub out_dir: PathBuf,
     pub report_json: Option<PathBuf>,
+    pub params: Params,
 }
 
 impl BakeOptions {
@@ -41,6 +100,7 @@ impl BakeOptions {
         Self {
             out_dir: out_dir.into(),
             report_json: None,
+            params: Params::default(),
         }
     }
 }
@@ -93,9 +153,10 @@ pub fn bake(dir: &Path, opts: &BakeOptions) -> Result<Report> {
     let (master_w, master_h) = (lineart.width, lineart.height);
 
     // ── 母帶階段（§3 管線）──────────────────────────────────────────
-    let line = binarize::line_mask(&lineart.rgba, binarize::DEFAULT_LINE_THRESHOLD);
+    let p = &opts.params;
+    let line = binarize::line_mask(&lineart.rgba, p.line_threshold);
     let line_ratio = binarize::line_ratio(&line);
-    diagnostics.extend(check::master::line_coverage(line_ratio));
+    diagnostics.extend(check::master::line_coverage(line_ratio, p.max_line_ratio));
 
     let seed_list = seeds::read(&seeds_img.rgba, master_w, master_h);
     report.seeds = Some(report::SeedStats {
@@ -113,9 +174,15 @@ pub fn bake(dir: &Path, opts: &BakeOptions) -> Result<Report> {
         master_w,
         master_h,
         &grown_areas,
-        segment::MIN_ORPHAN_AREA,
+        p.min_orphan_area,
     );
-    diagnostics.extend(check::master::seeds(&seed_list, &grown, &orphans));
+    diagnostics.extend(check::master::seeds(
+        &seed_list,
+        &grown,
+        &orphans,
+        p.min_seed_area,
+        p.min_orphan_area,
+    ));
 
     let lineart_white = compose::over_white(&lineart.rgba);
     let shade_white = shade.as_ref().map(|s| compose::over_white(&s.rgba));
@@ -341,6 +408,58 @@ mod tests {
                 report.to_text()
             );
         }
+    }
+
+    /// 預設值是契約的一部分（§3.3），寫死在測試裡當守門。
+    #[test]
+    fn the_default_params_are_the_contract() {
+        let p = Params::default();
+        assert_eq!(p.line_threshold, 128);
+        assert_eq!(p.min_seed_area, 64);
+        assert_eq!(p.min_orphan_area, 500);
+        assert_eq!(p.max_line_ratio, 0.35);
+    }
+
+    /// 打錯 key 必須報錯——靜默套用預設會讓「我明明調了參數」變成查不到的 bug。
+    #[test]
+    fn an_unknown_key_is_an_error_that_lists_the_valid_ones() {
+        let mut p = Params::default();
+        let e = p.set("min_orphan", "10").unwrap_err().to_string();
+        assert!(e.contains("min_orphan_area"), "{e}");
+        assert_eq!(p, Params::default(), "報錯就不該留下半套修改");
+    }
+
+    #[test]
+    fn set_parses_each_key_and_rejects_a_ratio_out_of_range() {
+        let mut p = Params::default();
+        p.set("line_threshold", "200").unwrap();
+        p.set("min_seed_area", "16").unwrap();
+        p.set("min_orphan_area", "1200").unwrap();
+        p.set("max_line_ratio", "0.5").unwrap();
+        assert_eq!((p.line_threshold, p.min_seed_area), (200, 16));
+        assert_eq!((p.min_orphan_area, p.max_line_ratio), (1200, 0.5));
+
+        assert!(p.set("max_line_ratio", "1.5").is_err());
+        assert!(p.set("line_threshold", "300").is_err(), "u8 溢位要報錯");
+    }
+
+    /// 參數真的有接進管線：把 `min_orphan_area` 調到碎片之下，
+    /// 原本靜默併入的碎片就會變成 `orphan-area`。
+    #[test]
+    fn lowering_min_orphan_area_turns_a_merged_fragment_into_an_error() {
+        let tmp = tempfile::tempdir().expect("建立 tempdir 失敗");
+        let dir = four_independent_problems()
+            .write(tmp.path())
+            .expect("寫出素材失敗");
+
+        let mut opts = BakeOptions::to(tmp.path().join("packs"));
+        opts.params.min_orphan_area = 100_000; // 遠大於整張畫布
+        let report = bake(&dir, &opts).expect("baker 不該自身故障");
+        assert!(
+            report.find(code::ORPHAN_AREA).is_none(),
+            "門檻拉高之後右半該被當成碎片併掉：\n{}",
+            report.to_text()
+        );
     }
 
     /// 色標統計一律列出——被拒收時也要有。
