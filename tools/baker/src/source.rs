@@ -9,8 +9,7 @@ use serde::Deserialize;
 use crate::report::{Diagnostic, Stage, code};
 
 pub const LINEART: &str = "lineart.png";
-pub const FLATS: &str = "flats.png";
-pub const REFERENCE: &str = "reference.png";
+pub const SEEDS: &str = "seeds.png";
 pub const SHADE: &str = "shade.png";
 pub const META: &str = "meta.json";
 
@@ -33,8 +32,7 @@ pub struct Source {
     pub folder_id: String,
     pub meta: Meta,
     pub lineart: PathBuf,
-    pub flats: PathBuf,
-    pub reference: PathBuf,
+    pub seeds: PathBuf,
     pub shade: Option<PathBuf>,
 }
 
@@ -91,8 +89,7 @@ impl Source {
             path
         };
         let lineart = require(LINEART);
-        let flats = require(FLATS);
-        let reference = require(REFERENCE);
+        let seeds = require(SEEDS);
         if !missing.is_empty() {
             diagnostics.push(Diagnostic::error(
                 code::SOURCE_INCOMPLETE,
@@ -110,8 +107,7 @@ impl Source {
                 folder_id,
                 meta,
                 lineart,
-                flats,
-                reference,
+                seeds,
                 shade,
             },
             diagnostics,

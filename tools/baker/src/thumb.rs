@@ -14,15 +14,16 @@ use crate::resample::box_rgba_by;
 pub const LONG_EDGE: u32 = 512;
 pub const QUALITY: u8 = 85;
 
-/// `lineart_white` / `shade_white` 都是已合成到白底的母帶 RGBA。
-pub fn render(
-    width: u32,
-    height: u32,
+/// 逐區配色 × shade × lineart，**母帶解析度**的 RGBA。
+///
+/// `thumb.jpg` 與 `--debug-out` 的 `reference-preview.png` 是同一張圖的兩個解析度
+/// （`baker-seeds.md §5`），所以合成只有這一份實作。
+pub fn composite(
     labels: &[u32],
     suggested: &[[u8; 3]],
     lineart_white: &[u8],
     shade_white: Option<&[u8]>,
-) -> Result<Vec<u8>> {
+) -> Vec<u8> {
     let mut master = vec![255u8; labels.len() * 4];
     for (i, &id) in labels.iter().enumerate() {
         let base = suggested[id as usize];
@@ -35,6 +36,19 @@ pub fn render(
             master[i * 4 + c] = v as u8;
         }
     }
+    master
+}
+
+/// `lineart_white` / `shade_white` 都是已合成到白底的母帶 RGBA。
+pub fn render(
+    width: u32,
+    height: u32,
+    labels: &[u32],
+    suggested: &[[u8; 3]],
+    lineart_white: &[u8],
+    shade_white: Option<&[u8]>,
+) -> Result<Vec<u8>> {
+    let master = composite(labels, suggested, lineart_white, shade_white);
 
     // 母帶長邊 4096 → factor 8。clamp 只為了讓小尺寸的單元測試不炸。
     let factor = (width.max(height) / LONG_EDGE).max(1);

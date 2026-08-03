@@ -11,8 +11,8 @@
 | [prd.md](./prd.md) | **要做什麼、為什麼** — 產品定位、原則、體驗、範圍 | 567 行 |
 | [architecture.md](./architecture.md) | **怎麼做** — 技術選型、分層、渲染、契約、持久化 | 1445 行 |
 | [roadmap/](./roadmap/README.md) | **什麼時候做、做完怎麼算** — 12 個里程碑 ＋ 決策點 | 每份 38–90 行 |
-| [specs/assets-spec.md](./specs/assets-spec.md) | 繪師交付規格（PNG ＋ meta.json 硬性要求） | v1.1 |
-| [specs/baker-seeds.md](./specs/baker-seeds.md) | 色標交付設計：`flats`／`reference` → `seeds.png`，區域改由線稿封閉區推導（**草案，待 Phase 0 驗證**） | 短 |
+| [specs/assets-spec.md](./specs/assets-spec.md) | 繪師交付規格（PNG ＋ meta.json 硬性要求） | v2.0 |
+| [specs/baker-seeds.md](./specs/baker-seeds.md) | 色標交付設計：為什麼區域改由線稿封閉區推導、`grow`／`close` 的規則（**已實作**；繪師端規格看 `assets-spec.md`） | 短 |
 | [specs/build-infra.md](./specs/build-infra.md) | workspace 佈局、依賴 lint 規則、CI 形狀（M0 基建） | 短 |
 | [specs/naming.md](./specs/naming.md) | 產品名稱決策記錄（為何不叫 Color It）＋ 上架前必補的查證項 | 短 |
 | [specs/ffi-contract.md](./specs/ffi-contract.md) | uniffi 型別與方法表、headless mock、`xtask ios`（S0 Rust 契約**設計**） | 509 行 |
@@ -58,7 +58,7 @@
 | 動 FFI / uniffi / JSON schema | `§7` 契約層 ＋ `specs/ffi-contract.md` |
 | 動存檔、oplog、Undo、崩潰復原 | `§8` 狀態與持久化 |
 | 動 baker、`.colorpack` 格式 | `§9` 資產管線 ＋ `specs/assets-spec.md` |
-| 繪師交付要交哪幾張圖、為什麼不再交 `flats` | `specs/baker-seeds.md` |
+| 繪師交付要交哪幾張圖 | `specs/assets-spec.md`（為什麼這樣改 → `specs/baker-seeds.md`） |
 | 動 iOS 整合、手勢、frame pacing | `§10` 平台整合 |
 | 動 R2、備份、雲端 | `§11` 雲端 |
 | 動 CI / 建置流程 | `§12` 建置與 CI ＋ `specs/build-infra.md` |

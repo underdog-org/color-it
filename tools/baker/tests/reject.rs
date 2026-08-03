@@ -52,7 +52,7 @@ impl Case {
             "{} 必須附座標——`assets-spec §7` 承諾退件附失敗座標",
             self.expect
         );
-        for coord in &diagnostic.coords {
+        for coord in &diagnostic.points() {
             assert!(
                 self.planted.contains(coord),
                 "{} 回報的座標 {coord:?} 不在植入點裡，失敗原因不是我們想測的那個。\n{}",
@@ -63,21 +63,57 @@ impl Case {
     }
 }
 
-/// 縫隙：`flats` 的 alpha < 255（§2.3 對「未指派像素」的唯一定義）。
+/// **線稿缺口**：兩個色標落進同一封閉區。座標成對列出，繪師才知道在哪兩點之間補線。
 #[test]
-fn gap_is_rejected_with_the_planted_coordinates() {
-    let case = run(Negative::Gap);
-    assert_eq!(case.expect, "unassigned-pixel");
+fn a_gap_in_the_lineart_is_rejected_as_a_seed_collision() {
+    let case = run(Negative::SeedCollision);
+    assert_eq!(case.expect, "seed-collision");
     case.assert_rejected_at_planted_coords();
-    assert_eq!(case.report.find(case.expect).unwrap().coord_total, 3);
+    let d = case.report.find(case.expect).unwrap();
+    assert_eq!(d.coords.len(), 2, "一組缺口 = 兩個座標：{:?}", d.coords);
 }
 
-/// `reference` 在某一塊裡塗了第二個顏色——不是相鄰區同色，那是合法的。
+/// **漏點**：整個封閉區沒有色標。附面積，且面積要落在該 cell 的量級。
 #[test]
-fn reference_with_a_second_color_inside_one_region_is_rejected() {
-    let case = run(Negative::RefMismatch);
-    assert_eq!(case.expect, "ref-mismatch");
+fn an_unseeded_closed_area_is_rejected_as_an_orphan() {
+    let case = run(Negative::OrphanArea);
+    assert_eq!(case.expect, "orphan-area");
     case.assert_rejected_at_planted_coords();
+    let d = case.report.find(case.expect).unwrap();
+    assert_eq!(d.coord_total, 1, "只漏點一個 cell：{}", d.message);
+}
+
+/// 色標太小 → 取不出可靠的眾數色。
+#[test]
+fn a_tiny_seed_is_rejected() {
+    let case = run(Negative::SeedTooSmall);
+    assert_eq!(case.expect, "seed-too-small");
+    case.assert_rejected_at_planted_coords();
+}
+
+/// 色標壓在線上 → flood fill 起不來。
+#[test]
+fn a_seed_on_the_line_is_rejected() {
+    let case = run(Negative::SeedOnLine);
+    assert_eq!(case.expect, "seed-on-line");
+    case.assert_rejected_at_planted_coords();
+}
+
+/// 白底交付的線稿：alpha 全滿 → 整張都判成線。這條是**警告**不是錯誤，
+/// 它的用途是解釋「為什麼一個區域都認不出來」，不是自己去擋。
+#[test]
+fn an_opaque_lineart_raises_the_coverage_warning() {
+    let case = run(Negative::LineCoverage);
+    let d = case
+        .report
+        .find("line-coverage")
+        .unwrap_or_else(|| panic!("沒有出現 line-coverage：\n{}", case.report.to_text()));
+    assert_eq!(d.severity, Severity::Warning);
+    assert!(
+        case.report.has_error(),
+        "整張都是線 → 色標全部壓線，仍然要拒收：\n{}",
+        case.report.to_text()
+    );
 }
 
 /// Display P3 描述檔。這條沒有座標可報（問題在 chunk 不在像素），改斷言訊息指名是哪張圖。
@@ -90,8 +126,8 @@ fn display_p3_profile_is_rejected() {
         .find("color-space")
         .unwrap_or_else(|| panic!("沒有出現 color-space：\n{}", case.report.to_text()));
     assert_eq!(d.severity, Severity::Error);
-    assert!(d.message.contains("flats.png"), "{}", d.message);
-    // 只有 flats 帶 P3，其餘三張不該被連坐
+    assert!(d.message.contains("seeds.png"), "{}", d.message);
+    // 只有 seeds 帶 P3，lineart 不該被連坐
     let hits = case
         .report
         .diagnostics
@@ -99,38 +135,4 @@ fn display_p3_profile_is_rejected() {
         .filter(|d| d.code == "color-space")
         .count();
     assert_eq!(hits, 1);
-}
-
-/// 開了抗鋸齒的 `flats`。撞到的必須是**實判**（`tiny-color-area`）而不是快篩——
-/// 這張圖只有三百多個顏色，遠低於 `MAX_UNIQUE_COLORS`（§2.6）。
-#[test]
-fn antialiased_flats_is_rejected_by_the_area_rule_not_the_screen() {
-    let case = run(Negative::Antialiased);
-    assert_eq!(case.expect, "tiny-color-area");
-    case.assert_rejected_at_planted_coords();
-    assert!(
-        case.report.find("unique-color-overflow").is_none(),
-        "唯一色數快篩不該命中——它不能取代面積判準"
-    );
-}
-
-/// 1px 特徵：母帶全數通過，降採樣才整批消失。
-#[test]
-fn vanishing_1px_features_are_rejected_at_the_output_stage() {
-    let case = run(Negative::Vanishing1px);
-    assert_eq!(case.expect, "region-count-drift");
-    case.assert_rejected_at_planted_coords();
-
-    let d = case.report.find(case.expect).unwrap();
-    assert_eq!(d.stage, baker::report::Stage::Output);
-    assert_eq!(d.coord_total, 300, "300 個植入點應該全數消失");
-    assert!(
-        !case
-            .report
-            .diagnostics
-            .iter()
-            .any(|d| d.stage == baker::report::Stage::Master && d.severity == Severity::Error),
-        "母帶階段應該全數通過：\n{}",
-        case.report.to_text()
-    );
 }

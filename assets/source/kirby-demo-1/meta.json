@@ -2,5 +2,5 @@
   "id": "kirby-demo-1",
   "title": "Kirby Demo 1",
   "category": "cartoon",
-  "notes": "M0 試作素材 A：1:1（4096²）、含 shade，跑 has_shade = true 那條路徑。68 個區域，示範氣球群的區域切分。⚠️ 第三方 IP 的暫代素材，僅供 M0/M1/E1 內部驗證，不得上線、也不得作為給繪師的風格基準。"
+  "notes": "M0 試作素材 A：1:1（4096²）、含 shade，跑 has_shade = true 那條路徑。示範氣球群的區域切分。seeds.png 由已廢止的 reference.png 反推而來，不是繪師依 assets-spec v2.0 交付的。⚠️ 第三方 IP 的暫代素材，僅供 M0/M1/E1 內部驗證，不得上線、也不得作為給繪師的風格基準。"
 }

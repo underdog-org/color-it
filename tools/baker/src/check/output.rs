@@ -176,16 +176,10 @@ pub fn check(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::segment::label_regions;
 
-    fn rgba(pixels: &[[u8; 3]]) -> Vec<u8> {
-        pixels
-            .iter()
-            .flat_map(|c| [c[0], c[1], c[2], 255])
-            .collect()
+    fn master(labels: &[u32], w: u32, h: u32, count: u32) -> RegionMap {
+        RegionMap::from_labels(labels.to_vec(), w, h, count)
     }
-    const R: [u8; 3] = [255, 0, 0];
-    const G: [u8; 3] = [0, 255, 0];
 
     #[test]
     fn stats_are_in_output_space() {
@@ -199,33 +193,32 @@ mod tests {
     #[test]
     fn vanished_region_is_an_error_with_master_coordinates() {
         // 母帶 4×2：兩區，其中 id 1 是 (1,0) 的單一像素
-        let master = label_regions(&rgba(&[R, G, R, R, R, R, R, R]), 4, 2);
-        assert_eq!(master.count, 2);
+        let m = master(&[0, 1, 0, 0, 0, 0, 0, 0], 4, 2, 2);
         let ids = vec![0, 0]; // majority 把 id 1 吃掉
-        let s = stats(&ids, 2, 1, master.count);
-        let out = check(&master, &ids, 2, 1, &s);
+        let s = stats(&ids, 2, 1, m.count);
+        let out = check(&m, &ids, 2, 1, &s);
         let d = out
             .iter()
             .find(|d| d.code == code::REGION_COUNT_DRIFT)
             .unwrap();
-        assert!(d.coords.contains(&(1, 0)));
+        assert!(d.points().contains(&(1, 0)));
     }
 
     #[test]
     fn split_region_is_a_warning() {
-        let master = label_regions(&rgba(&[R, R, R, R]), 4, 1);
-        let ids = vec![0, 0, 0, 0];
-        // 人為造一個裂開的輸出：id 0 出現在兩端，中間是 0 以外的東西做不到（只有一區），
-        // 所以改用兩區的情境
-        let master2 = label_regions(&rgba(&[R, G, R]), 3, 1);
+        // id 0 在輸出被 id 1 從中間切開 → 兩塊
+        let m2 = master(&[0, 1, 0], 3, 1, 2);
         let split_ids = vec![0, 1, 0];
-        let s = stats(&split_ids, 3, 1, master2.count);
-        let out = check(&master2, &split_ids, 3, 1, &s);
+        let s = stats(&split_ids, 3, 1, m2.count);
+        let out = check(&m2, &split_ids, 3, 1, &s);
         assert!(out.iter().any(|d| d.code == code::REGION_SPLIT));
 
-        let s = stats(&ids, 4, 1, master.count);
+        // 反例：連成一塊的不報
+        let m1 = master(&[0, 0, 0, 0], 4, 1, 1);
+        let ids = vec![0, 0, 0, 0];
+        let s = stats(&ids, 4, 1, m1.count);
         assert!(
-            !check(&master, &ids, 4, 1, &s)
+            !check(&m1, &ids, 4, 1, &s)
                 .iter()
                 .any(|d| d.code == code::REGION_SPLIT)
         );

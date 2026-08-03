@@ -8,7 +8,7 @@ use clap::Parser;
 #[derive(Parser)]
 #[command(
     name = "baker",
-    about = "Colorlull 資產烘焙（docs/specs/baker-core-design.md）"
+    about = "Colorlull 資產烘焙（docs/specs/baker-seeds.md）"
 )]
 struct Cli {
     /// 素材來源目錄（資料夾名即 id）
@@ -19,13 +19,34 @@ struct Cli {
     /// 額外把報告寫成 JSON
     #[arg(long, value_name = "PATH")]
     report: Option<PathBuf>,
+    /// 覆寫 §3.3 的參數，可重複：
+    /// line_threshold / min_seed_area / min_orphan_area / max_line_ratio
+    #[arg(long = "set", value_name = "KEY=VALUE")]
+    set: Vec<String>,
+    /// 產出退件附件到指定目錄：preview.png / seeds-overlay.png /
+    /// reference-preview.png / regions.json（拒收時照樣產出）
+    #[arg(long = "debug-out", value_name = "DIR")]
+    debug_out: Option<PathBuf>,
 }
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
+    let mut params = baker::Params::default();
+    for entry in &cli.set {
+        let Some((key, value)) = entry.split_once('=') else {
+            eprintln!("baker 故障：--set 要寫成 key=value，收到 {entry:?}");
+            return ExitCode::from(2);
+        };
+        if let Err(e) = params.set(key.trim(), value.trim()) {
+            eprintln!("baker 故障：{e:#}");
+            return ExitCode::from(2);
+        }
+    }
     let opts = baker::BakeOptions {
         out_dir: cli.out,
         report_json: cli.report,
+        params,
+        debug_out: cli.debug_out,
     };
     match baker::bake(&cli.src_dir, &opts) {
         Ok(report) => {

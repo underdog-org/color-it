@@ -1,7 +1,8 @@
 # baker · 色標交付（seeds）
 
-> 狀態：草案（2026-08-03）｜取代 [assets-spec](./assets-spec.md) §4.2 §4.3 §5 §6、[baker-core-design](./baker-core-design.md) §2.1 §2.3 §2.4
+> 狀態：**已實作**（2026-08-03，Phase 0–4 全部完成）｜設計理由文件，繪師端規格見 [assets-spec v2.0](./assets-spec.md)
 >
+> 取代 [baker-core-design](./baker-core-design.md) §2.1 §2.3 §2.4。
 > `.colorpack` 格式、App 端、`check/output.rs`、`resample` / `dilate` / `thumb` 一律不動。
 
 ## 1. 為什麼改
@@ -188,10 +189,56 @@ thumb → resample → dilate → check::output → 打包                     �
 
 **這一步的結果決定本案能不能走。** 若 `adventure-time-demo-1` 的線稿封閉性撐不住（大量 collision，且缺口是風格而非疏忽），退回退路方案（§8）。這是整個計畫唯一的不可逆風險點。
 
-**Phase 1** `binarize` + `seeds` + `grow` + `close` + 新診斷碼
-**Phase 2** `synth.rs` 改寫 + 三張測試網
-**Phase 3** `--debug-out` 四件產物 + 座標聚類 + 可疑度排序
-**Phase 4** `assets-spec.md` 重寫（§4.2 §4.3 §5 §6 大改），產出可直接附進繪師 JD 的版本
+**Phase 1** ✅ `binarize` + `seeds` + `grow` + `close` + 新診斷碼
+**Phase 2** ✅ `synth.rs` 改寫 + golden test（凍結 `region_ids` 與 `content_hash`）+ 階段內不 fail-fast 迴歸
+**Phase 3** ✅ `--debug-out` 四件產物 + 座標聚類 + 可疑度排序
+**Phase 4** ✅ `assets-spec.md` v2.0（§0 是可整段複製進 JD 的一頁摘要）
+
+### 實作後與本文的三處出入
+
+1. **差分測試沒做**（§6 第 3 條）。它要拿 `flats.png` 當基準，而 Phase 0 已判定那張不合規；改用 `reference.png` 又只能在本地跑（demo 素材走 LFS，CI 以 `lfs: false` checkout）。golden test 涵蓋了同一個風險，這條就不補了。
+2. **座標聚類不是一體適用**（§5）。色標的四條診斷不聚類——`seed-collision` 的兩個 anchor 若被聚成一叢，「在這兩點之間補線」就沒有意義了。只有 `shade-too-dark` 這種逐像素症狀與輸出階段的診斷才聚。
+3. **`preview.png` 的配色依鄰接關係挑，不是「隨機」**（§5）。region id 是 raster order，空間上相鄰的兩區 id 不一定相鄰，照 id 上色會讓相鄰兩區拿到相近的顏色——那正好毀掉這張圖唯一的用途。
+
+`migrate.rs`（`reference.png` → `seeds.png` 的過渡橋）與 `assets/source/*/flats.png`、`reference.png` 已於 Phase 4 一併刪除。兩支 demo 的 `seeds.png` 是反推產物，繪師依 v2.0 重交後即為正式素材。
+
+### Phase 0 實測結果（2026-08-03，`adventure-time-demo-1`）
+
+**改用 `reference.png` 而非 `flats.png` 當真值。** `meta.json` 記載這張 `flats.png` 不合規：171 色、其中 166 色總面積 <200px，且 7 個區域跨線稿合併、合計佔畫布 57.66%。從它反推的色標，collision 反映的會是 flats 壞掉而不是線稿不封閉——而 Phase 0 要決定的偏偏是後者。同一份 `meta.json` 記載 `reference.png` 的幾何 99.95% 對齊線稿，所以改量兩件事：
+
+- **A 線稿封閉區普查**：只看線稿，數非線像素的 4-連通塊。無假陽性。
+- **B 欠分割交叉檢查**：每個封閉區內 `reference` 的顏色是不是雙峰（第二眾數佔 ≥20% 且 RGB 距離 ≥60）。雙峰 = 繪師本想分兩塊但線稿沒隔開 = **真實工作流下的 `seed-collision`**。
+
+| 指標 | 數值 |
+|---|---|
+| 母帶尺寸 | 3072×4096（12.6M px） |
+| 線像素佔比 | 4.98%（遠低於 `MAX_LINE_RATIO` 0.35） |
+| 封閉區總數 | 83 |
+| ≥`MIN_ORPHAN_AREA` 的封閉區 | 62 個，佔非線像素 99.94% |
+| <`MIN_ORPHAN_AREA` 的碎片 | 21 個，合計 7733 px（0.061% 畫布） |
+| **欠分割（collision 代理）** | **0 / 62（0.0%）** |
+| 建議色種類 | 7 |
+| `close` 輪數 / 剩餘未指派 | 66 / **0** |
+
+**判定：GO。**
+
+線稿封閉性完全撐得住：62 個封閉區**每一個在 `reference` 裡都是單一平塗色**（第一眾數皆 ≈100%），沒有任何一個封閉區橫跨兩片意圖不同的顏色。`close` 在 66 輪內收斂、剩餘 0 px，全覆蓋不變式成立。碎片只佔畫布 0.061%，§3.1 ④ 的「併入鄰居」處理得掉。
+
+### Phase 0 的兩個發現
+
+**① 線稿比配色細 8.9 倍——這是本案真正的成本，不是風險。**
+
+7 個建議色對上 62 個封閉區。白色一色就橫跨 27 個封閉區（Finn 的帽子與身體、雲、Jake 的眼睛與口鼻、以及**被交叉線切成約 8 條的劍身**）。
+
+代價落在繪師身上：**要點 62 個點，不是 7 個點。** 繪師若照直覺「一個顏色點一個」，會有 55 個封閉區變成 `orphan-area`，一次退件噴 55 條。
+
+這件事必須寫死在 §2.1 與 Phase 4 的 JD 裡，而且要是第一句話：
+
+> **一個封閉區一個點——不是一個顏色一個點。** 線稿把一片顏色切成幾塊，就要點幾個點。
+
+好處是這 62 區在 App 端本來就是 62 個可獨立上色的區，比 A 案的 flats 更細，對著色體驗是加分。`--debug-out` 的 `preview.png`（§5）是繪師確認「我有沒有漏點」的唯一實際手段，優先度因此比原本估的高。
+
+**② 裝飾性開放線條不造成問題。** 背景的草叢短撇、劍身的反光線都是不封閉的開放筆畫，不產生額外封閉區，也沒觸發任何 collision。§9「不做 trapped-ball 自動封補」的判斷在這個畫風下成立。
 
 ## 8. 退路
 

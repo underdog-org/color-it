@@ -82,24 +82,57 @@ impl Canvas {
         }
     }
 
-    pub fn flats_rgba(&self) -> Vec<u8> {
-        self.idx
-            .iter()
-            .flat_map(|&i| {
-                let c = PALETTE[i as usize];
-                [c[0], c[1], c[2], 255]
-            })
-            .collect()
-    }
+    /// 每個 idx 連通塊點一個色標（`baker-seeds.md §2.1`）。顏色取 `PERM` 映射後的
+    /// palette——色標顏色**就是**建議色，PERM 讓它與 idx 本身不同，避免測試在
+    /// 「剛好相等」的巧合下變綠。
+    ///
+    /// 色點由 anchor 起在「同塊 ∩ 非線」上 BFS 取 `DOT_AREA` 個像素：BFS 保證色點
+    /// 連通（`seeds::read` 用 4-連通，斷開就會變成兩個 seed），非線保證 anchor 不壓線。
+    /// 塊內非線像素不足時就畫多少算多少——那正是 `seed-too-small` 該報的情況。
+    pub fn seeds_rgba(&self) -> Vec<u8> {
+        let (w, h) = (self.width as usize, self.height as usize);
+        let line = crate::binarize::line_mask(
+            &self.lineart_rgba(),
+            crate::binarize::DEFAULT_LINE_THRESHOLD,
+        );
+        let mut out = vec![0u8; w * h * 4];
+        let mut seen = vec![false; w * h];
+        let mut stack: Vec<usize> = Vec::new();
+        let mut blob: Vec<usize> = Vec::new();
 
-    pub fn reference_rgba(&self) -> Vec<u8> {
-        self.idx
-            .iter()
-            .flat_map(|&i| {
-                let c = PALETTE[PERM[i as usize] as usize];
-                [c[0], c[1], c[2], 255]
-            })
-            .collect()
+        for start in 0..w * h {
+            if seen[start] {
+                continue;
+            }
+            let target = self.idx[start];
+            blob.clear();
+            seen[start] = true;
+            stack.push(start);
+            while let Some(p) = stack.pop() {
+                blob.push(p);
+                let (x, y) = (p % w, p / w);
+                let mut visit = |n: usize, stack: &mut Vec<usize>| {
+                    if !seen[n] && self.idx[n] == target {
+                        seen[n] = true;
+                        stack.push(n);
+                    }
+                };
+                if x > 0 {
+                    visit(p - 1, &mut stack);
+                }
+                if x + 1 < w {
+                    visit(p + 1, &mut stack);
+                }
+                if y > 0 {
+                    visit(p - w, &mut stack);
+                }
+                if y + 1 < h {
+                    visit(p + w, &mut stack);
+                }
+            }
+            paint_dot(&mut out, &blob, &line, self.idx[start], w, h);
+        }
+        out
     }
 
     /// 線稿 = 區域邊界，1px 不透明黑、其餘真透明。
@@ -122,6 +155,56 @@ impl Canvas {
     }
 }
 
+/// 色點的目標面積。`MIN_SEED_AREA` 是 64，留一點餘裕，讓「合格素材」不會卡在門檻上。
+const DOT_AREA: usize = 96;
+
+fn paint_dot(out: &mut [u8], blob: &[usize], line: &[bool], idx: u8, w: usize, h: usize) {
+    let free: std::collections::HashSet<usize> =
+        blob.iter().copied().filter(|&p| !line[p]).collect();
+    if free.is_empty() {
+        return;
+    }
+    // anchor 取最接近塊重心的非線像素，平手取 raster order 前者。
+    let n = blob.len() as i64;
+    let cx = blob.iter().map(|&p| (p % w) as i64).sum::<i64>() / n;
+    let cy = blob.iter().map(|&p| (p / w) as i64).sum::<i64>() / n;
+    let anchor = *free
+        .iter()
+        .min_by_key(|&&p| {
+            let (dx, dy) = ((p % w) as i64 - cx, (p / w) as i64 - cy);
+            (dx * dx + dy * dy, p)
+        })
+        .expect("free 非空");
+
+    let color = PALETTE[PERM[idx as usize] as usize];
+    let mut queue = std::collections::VecDeque::from([anchor]);
+    let mut taken = std::collections::HashSet::from([anchor]);
+    while let Some(p) = queue.pop_front() {
+        out[p * 4..p * 4 + 4].copy_from_slice(&[color[0], color[1], color[2], 255]);
+        if taken.len() >= DOT_AREA {
+            continue;
+        }
+        let (x, y) = (p % w, p / w);
+        let mut visit = |n: usize, queue: &mut std::collections::VecDeque<usize>| {
+            if taken.len() < DOT_AREA && free.contains(&n) && taken.insert(n) {
+                queue.push_back(n);
+            }
+        };
+        if x > 0 {
+            visit(p - 1, &mut queue);
+        }
+        if x + 1 < w {
+            visit(p + 1, &mut queue);
+        }
+        if y > 0 {
+            visit(p - w, &mut queue);
+        }
+        if y + 1 < h {
+            visit(p + w, &mut queue);
+        }
+    }
+}
+
 /// 一份可以直接寫成來源目錄的合成素材。
 pub struct Asset {
     pub id: String,
@@ -130,12 +213,11 @@ pub struct Asset {
     pub notes: String,
     pub width: u32,
     pub height: u32,
-    pub flats: Vec<u8>,
     pub lineart: Vec<u8>,
-    pub reference: Vec<u8>,
+    pub seeds: Vec<u8>,
     pub shade: Option<Vec<u8>>,
-    /// 只有 `display-p3` fixture 會用到。
-    pub flats_icc: Option<Vec<u8>>,
+    /// 只有 `display-p3` fixture 會用到。掛在 `seeds.png` 上。
+    pub seeds_icc: Option<Vec<u8>>,
     /// fixture 走 Fast：測試只在乎內容，不在乎檔案大小。
     pub compression: png::Compression,
 }
@@ -154,9 +236,8 @@ impl Asset {
             let bytes = encode_rgba(rgba, self.width, self.height, opts(icc))?;
             std::fs::write(dir.join(name), bytes).with_context(|| format!("寫入 {name} 失敗"))
         };
-        write(crate::source::FLATS, &self.flats, self.flats_icc.clone())?;
         write(crate::source::LINEART, &self.lineart, None)?;
-        write(crate::source::REFERENCE, &self.reference, None)?;
+        write(crate::source::SEEDS, &self.seeds, self.seeds_icc.clone())?;
         if let Some(shade) = &self.shade {
             write(crate::source::SHADE, shade, None)?;
         }
@@ -420,11 +501,10 @@ pub fn torture_01() -> Asset {
         notes: TORTURE_NOTES.to_owned(),
         width: T_W,
         height: T_H,
-        flats: canvas.flats_rgba(),
         lineart: canvas.lineart_rgba(),
-        reference: canvas.reference_rgba(),
+        seeds: canvas.seeds_rgba(),
         shade: None,
-        flats_icc: None,
+        seeds_icc: None,
         // 進 LFS，壓縮率比產生速度重要。
         compression: png::Compression::High,
     }
@@ -434,16 +514,15 @@ pub fn torture_01() -> Asset {
 /// 依 `.gitattributes` 不進 LFS，所以 CI 以 `lfs: false` checkout 也讀得到。
 pub const LOCK_FILE: &str = "synth-lock.json";
 
-/// 三張圖的**原始 RGBA** 的正規化 hash。
+/// 兩張圖的**原始 RGBA** 的正規化 hash。
 ///
 /// 刻意不 hash PNG bytes：那會綁到 `png` crate 的 deflate 實作，換一次依賴版本
 /// 就誤報。要守的是「改了生成器卻忘了重跑 `gen-torture`」，那是內容層的事。
 pub fn torture_content_hash() -> String {
     let asset = torture_01();
     colorpack::hash::content_hash(&[
-        (crate::source::FLATS, asset.flats.as_slice()),
         (crate::source::LINEART, asset.lineart.as_slice()),
-        (crate::source::REFERENCE, asset.reference.as_slice()),
+        (crate::source::SEEDS, asset.seeds.as_slice()),
     ])
 }
 
@@ -468,22 +547,24 @@ pub fn write_torture(repo_root: &Path) -> Result<PathBuf> {
 
 // ── 合格的小型素材（端到端測試用）───────────────────────────────────
 
+/// 由上而下的柔和漸層，luma 一律 ≥ 60（`assets-spec §4.4`）。
+fn soft_shade(width: u32, height: u32) -> Vec<u8> {
+    let mut buf = vec![255u8; (width * height * 4) as usize];
+    for y in 0..height {
+        let v = 255 - (y * 100 / height) as u8;
+        for x in 0..width {
+            let i = ((y * width + x) * 4) as usize;
+            buf[i..i + 3].copy_from_slice(&[v, v, v]);
+        }
+    }
+    buf
+}
+
 /// 一張合規的合成素材：粗網格 ＋ 邊界線稿 ＋ PERM 配色。
 pub fn valid(id: &str, width: u32, height: u32, cell: u32, has_shade: bool) -> Asset {
     let mut canvas = Canvas::new(width, height);
     zone_grid(&mut canvas, (0, 0, width, height), 0, cell);
-    let shade = has_shade.then(|| {
-        // 由上而下的柔和漸層，luma 一律 ≥ 60（`assets-spec §4.4`）。
-        let mut buf = vec![255u8; (width * height * 4) as usize];
-        for y in 0..height {
-            let v = 255 - (y * 100 / height) as u8;
-            for x in 0..width {
-                let i = ((y * width + x) * 4) as usize;
-                buf[i..i + 3].copy_from_slice(&[v, v, v]);
-            }
-        }
-        buf
-    });
+    let shade = has_shade.then(|| soft_shade(width, height));
     Asset {
         id: id.to_owned(),
         title: format!("Synthetic {id}"),
@@ -491,11 +572,56 @@ pub fn valid(id: &str, width: u32, height: u32, cell: u32, has_shade: bool) -> A
         notes: "baker::synth 產生的合成素材，不是繪師交付。".to_owned(),
         width,
         height,
-        flats: canvas.flats_rgba(),
         lineart: canvas.lineart_rgba(),
-        reference: canvas.reference_rgba(),
+        seeds: canvas.seeds_rgba(),
         shade,
-        flats_icc: None,
+        seeds_icc: None,
+        compression: png::Compression::Fast,
+    }
+}
+
+// ── golden 素材（`baker-seeds.md §6` 第 1 條）──────────────────────────
+
+const G_CELL: u32 = 512;
+
+/// 埋在 cell(2,3) 裡的小方塊。邊界成線之後內部剩 18×18 = 324px，低於
+/// `MIN_ORPHAN_AREA`(500)；色標再擦掉，它就是 `merge_small_orphans` 該**靜默併掉**
+/// 的碎片。沒有它，golden 只釘得住 `grow` + `close`，併碎片那條路徑
+/// （穿線找最近環、取面積最大的鄰居、平手取較小 id）在整合層面完全沒有網。
+const G_FRAGMENT: (u32, u32, u32, u32) = (2 * G_CELL + 100, 3 * G_CELL + 100, 20, 20);
+
+/// golden test 的固定素材。**不要改它**——改了就等於改掉凍結值，
+/// 而凍結值存在的理由正是「演算法改了會被擋下」。
+///
+/// 3072×4096、512 格 → 6×8 = 48 區，有 shade（走 `has_shade = true` 那條路徑），
+/// 外加一塊 `G_FRAGMENT`。
+pub fn golden() -> Asset {
+    let mut canvas = Canvas::new(F_W, F_H);
+    zone_grid(&mut canvas, (0, 0, F_W, F_H), 0, G_CELL);
+    let (fx, fy, fw, fh) = G_FRAGMENT;
+    // 15 與 cell(2,3) 的 7 不同色，邊界才生得出線。
+    canvas.rect(fx, fy, fw, fh, 15);
+
+    let lineart = canvas.lineart_rgba();
+    let mut seeds = canvas.seeds_rgba();
+    // 擦掉碎片自己的色標——`seeds_rgba` 每個 idx 連通塊都會點一個。
+    for y in fy..fy + fh {
+        for x in fx..fx + fw {
+            seeds[((y * F_W + x) * 4 + 3) as usize] = 0;
+        }
+    }
+
+    Asset {
+        id: "synth-golden".to_owned(),
+        title: "Synthetic golden".to_owned(),
+        category: "mandala".to_owned(),
+        notes: "golden test 的固定素材，不是繪師交付。改動它等於改掉凍結值。".to_owned(),
+        width: F_W,
+        height: F_H,
+        lineart,
+        seeds,
+        shade: Some(soft_shade(F_W, F_H)),
+        seeds_icc: None,
         compression: png::Compression::Fast,
     }
 }
@@ -504,16 +630,18 @@ pub fn valid(id: &str, width: u32, height: u32, cell: u32, has_shade: bool) -> A
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Negative {
-    /// 未指派像素（`flats` alpha < 255）。
-    Gap,
-    /// 在某一塊裡塗第二個顏色——不是相鄰區同色，那是合法的。
-    RefMismatch,
+    /// 線稿有缺口 → 兩個色標落進同一封閉區。
+    SeedCollision,
+    /// 整個封閉區沒有色標 → 繪師漏點。
+    OrphanArea,
+    /// 色標太小，取不出可靠的眾數色。
+    SeedTooSmall,
+    /// 色標壓在線上，flood fill 起不來。
+    SeedOnLine,
+    /// 白底交付的線稿：alpha 全滿，整張都判成線。
+    LineCoverage,
     /// 帶 Display P3 描述檔。
     DisplayP3,
-    /// 開了抗鋸齒的 `flats`：邊界上生出一堆只佔零星像素的混色。
-    Antialiased,
-    /// 1px 特徵，降採樣後整批消失。
-    Vanishing1px,
 }
 
 pub struct Fixture {
@@ -529,16 +657,41 @@ pub struct Fixture {
 const F_W: u32 = 3072;
 const F_H: u32 = 4096;
 
+/// fixture 的格線邊長。12×16 = 192 個封閉區。
+const F_CELL: u32 = 256;
+
+fn cell_rect(cx: u32, cy: u32) -> (u32, u32, u32, u32) {
+    (cx * F_CELL, cy * F_CELL, F_CELL, F_CELL)
+}
+
 pub fn negative(kind: Negative) -> Fixture {
     let id = match kind {
-        Negative::Gap => "fixture-gap",
-        Negative::RefMismatch => "fixture-ref-mismatch",
+        Negative::SeedCollision => "fixture-seed-collision",
+        Negative::OrphanArea => "fixture-orphan-area",
+        Negative::SeedTooSmall => "fixture-seed-too-small",
+        Negative::SeedOnLine => "fixture-seed-on-line",
+        Negative::LineCoverage => "fixture-line-coverage",
         Negative::DisplayP3 => "fixture-display-p3",
-        Negative::Antialiased => "fixture-antialiased",
-        Negative::Vanishing1px => "fixture-vanishing-1px",
     };
     let mut canvas = Canvas::new(F_W, F_H);
-    zone_grid(&mut canvas, (0, 0, F_W, F_H), 0, 256);
+    zone_grid(&mut canvas, (0, 0, F_W, F_H), 0, F_CELL);
+    let mut lineart = canvas.lineart_rgba();
+
+    // 缺口要在畫色標**之前**開：`seeds_rgba` 用線稿決定色點畫在哪些非線像素上。
+    if kind == Negative::SeedCollision {
+        for y in 64..192u32 {
+            for x in [F_CELL - 1, F_CELL] {
+                lineart[((y * F_W + x) * 4 + 3) as usize] = 0;
+            }
+        }
+    }
+    if kind == Negative::LineCoverage {
+        for px in lineart.chunks_exact_mut(4) {
+            px[3] = 255;
+        }
+    }
+
+    let mut seeds = canvas.seeds_rgba();
     let mut asset = Asset {
         id: id.to_owned(),
         title: format!("Fixture {id}"),
@@ -546,61 +699,65 @@ pub fn negative(kind: Negative) -> Fixture {
         notes: "baker::synth::negative 產生的預期拒收素材。".to_owned(),
         width: F_W,
         height: F_H,
-        flats: canvas.flats_rgba(),
-        lineart: canvas.lineart_rgba(),
-        reference: canvas.reference_rgba(),
+        lineart,
+        seeds: Vec::new(),
         shade: None,
-        flats_icc: None,
+        seeds_icc: None,
         compression: png::Compression::Fast,
     };
-    let px = |x: u32, y: u32| ((y * F_W + x) * 4) as usize;
+
+    /// 把一個 cell 內的色標整個擦掉。
+    fn clear_cell(seeds: &mut [u8], (x0, y0, w, h): (u32, u32, u32, u32)) {
+        for y in y0..y0 + h {
+            for x in x0..x0 + w {
+                seeds[((y * F_W + x) * 4 + 3) as usize] = 0;
+            }
+        }
+    }
+    fn dot(seeds: &mut [u8], x0: u32, y0: u32, w: u32, h: u32) {
+        for y in y0..y0 + h {
+            for x in x0..x0 + w {
+                let i = ((y * F_W + x) * 4) as usize;
+                seeds[i..i + 4].copy_from_slice(&[7, 200, 90, 255]);
+            }
+        }
+    }
 
     let (expect, planted) = match kind {
-        Negative::Gap => {
-            let spots = [(1234, 2345), (2000, 100), (7, 4090)];
-            for (x, y) in spots {
-                asset.flats[px(x, y) + 3] = 0;
-            }
-            (crate::report::code::UNASSIGNED_PIXEL, spots.to_vec())
+        Negative::SeedCollision => {
+            // 缺口讓 cell(0,0) 與 cell(1,0) 連成一個封閉區，兩個色標撞在一起。
+            let anchors = anchors_in(&seeds, &[cell_rect(0, 0), cell_rect(1, 0)]);
+            (crate::report::code::SEED_COLLISION, anchors)
         }
-        Negative::RefMismatch => {
-            // 在單一區域內部塗第二個顏色。raster order 的第一個相異像素就是左上角。
-            let (bx, by) = (600, 900);
-            for y in by..by + 16 {
-                for x in bx..bx + 16 {
-                    asset.reference[px(x, y)..px(x, y) + 3].copy_from_slice(&[1, 2, 3]);
-                }
-            }
-            (crate::report::code::REF_MISMATCH, vec![(bx, by)])
+        Negative::OrphanArea => {
+            let rect = cell_rect(5, 5);
+            clear_cell(&mut seeds, rect);
+            // orphan 的 anchor 是該塊在 raster order 的第一個非線像素。
+            let anchor = first_free(&asset.lineart, rect).expect("cell 內必有非線像素");
+            (crate::report::code::ORPHAN_AREA, vec![anchor])
         }
+        Negative::SeedTooSmall => {
+            let (x0, y0, ..) = cell_rect(3, 3);
+            clear_cell(&mut seeds, cell_rect(3, 3));
+            dot(&mut seeds, x0 + 8, y0 + 8, 2, 2);
+            // 2×2 的重心落在左上角那格。
+            (crate::report::code::SEED_TOO_SMALL, vec![(x0 + 8, y0 + 8)])
+        }
+        Negative::SeedOnLine => {
+            clear_cell(&mut seeds, cell_rect(7, 7));
+            // cell(6,7) 與 cell(7,7) 的分界：兩欄都是線像素。
+            let (x, y) = (7 * F_CELL - 1, 1900);
+            dot(&mut seeds, x, y, 2, 1);
+            (crate::report::code::SEED_ON_LINE, vec![(x, y)])
+        }
+        Negative::LineCoverage => (crate::report::code::LINE_COVERAGE, Vec::new()),
         Negative::DisplayP3 => {
-            asset.flats_icc = Some(display_p3_profile());
+            asset.seeds_icc = Some(display_p3_profile());
             (crate::report::code::COLOR_SPACE, Vec::new())
-        }
-        Negative::Antialiased => {
-            let mut planted = Vec::new();
-            for i in 0..300u32 {
-                let (x, y) = (1000 + i, 2000);
-                asset.flats[px(x, y)..px(x, y) + 3].copy_from_slice(&[200, i as u8, 7]);
-                planted.push((x, y));
-            }
-            (crate::report::code::TINY_COLOR_AREA, planted)
-        }
-        Negative::Vanishing1px => {
-            let mut planted = Vec::new();
-            for i in 0..300u32 {
-                let (x, y) = (513 + 8 * i, 1001);
-                canvas.set(x, y, 5);
-                asset.flats[px(x, y)..px(x, y) + 3].copy_from_slice(&PALETTE[5]);
-                let ref_color = PALETTE[PERM[5] as usize];
-                asset.reference[px(x, y)..px(x, y) + 3].copy_from_slice(&ref_color);
-                planted.push((x, y));
-            }
-            asset.lineart = canvas.lineart_rgba();
-            (crate::report::code::REGION_COUNT_DRIFT, planted)
         }
     };
 
+    asset.seeds = seeds;
     Fixture {
         asset,
         expect,
@@ -608,23 +765,70 @@ pub fn negative(kind: Negative) -> Fixture {
     }
 }
 
+/// 落在任一 rect 內的色標 anchor，依 `seeds::read` 的順序。
+fn anchors_in(seeds: &[u8], rects: &[(u32, u32, u32, u32)]) -> Vec<(u32, u32)> {
+    crate::seeds::read(seeds, F_W, F_H)
+        .into_iter()
+        .map(|s| s.anchor)
+        .filter(|&(x, y)| {
+            rects
+                .iter()
+                .any(|&(x0, y0, w, h)| x >= x0 && x < x0 + w && y >= y0 && y < y0 + h)
+        })
+        .collect()
+}
+
+/// rect 內 raster order 的第一個非線像素。
+fn first_free(lineart: &[u8], (x0, y0, w, h): (u32, u32, u32, u32)) -> Option<(u32, u32)> {
+    let threshold = crate::binarize::DEFAULT_LINE_THRESHOLD;
+    (y0..y0 + h)
+        .flat_map(|y| (x0..x0 + w).map(move |x| (x, y)))
+        .find(|&(x, y)| lineart[((y * F_W + x) * 4 + 3) as usize] < threshold)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    /// 每個 idx 連通塊剛好一個色標，且色點不壓線、面積過得了 `MIN_SEED_AREA`。
+    /// 這是「合格素材」的定義——`valid()` 產出的東西必須自己先成立。
     #[test]
-    fn palette_does_not_contain_the_reserved_color() {
-        assert!(!PALETTE.contains(&crate::segment::RESERVED_COLOR));
+    fn every_cell_gets_exactly_one_usable_seed() {
+        let mut g = Canvas::new(128, 128);
+        zone_grid(&mut g, (0, 0, 128, 128), 0, 32);
+        let line =
+            crate::binarize::line_mask(&g.lineart_rgba(), crate::binarize::DEFAULT_LINE_THRESHOLD);
+        let seeds = crate::seeds::read(&g.seeds_rgba(), 128, 128);
+
+        assert_eq!(seeds.len(), 16, "4×4 格 → 16 個色標，多一個就是色點斷開了");
+        for s in &seeds {
+            assert!(
+                s.solid_area >= crate::seeds::MIN_SEED_AREA,
+                "色標 {:?} 只有 {}px",
+                s.anchor,
+                s.solid_area
+            );
+            let i = (s.anchor.1 * 128 + s.anchor.0) as usize;
+            assert!(!line[i], "色標 {:?} 的 anchor 壓在線上", s.anchor);
+        }
+    }
+
+    /// 色標顏色**就是**建議色，取 `PERM` 映射避免與 idx 本身相等。
+    #[test]
+    fn seed_colour_is_the_permuted_palette_entry() {
+        let mut g = Canvas::new(64, 64);
+        zone_grid(&mut g, (0, 0, 64, 64), 0, 32);
+        let seeds = crate::seeds::read(&g.seeds_rgba(), 64, 64);
+        let idx = g.get(seeds[0].anchor.0, seeds[0].anchor.1);
+        assert_eq!(seeds[0].color, PALETTE[PERM[idx as usize] as usize]);
+        assert_ne!(seeds[0].color, PALETTE[idx as usize]);
     }
 
     #[test]
     fn perm_is_a_bijection_without_fixed_points() {
         let mut seen = [false; 16];
         for (i, &p) in PERM.iter().enumerate() {
-            assert_ne!(
-                p as usize, i,
-                "PERM 有不動點，reference 會與 flats 位元相同"
-            );
+            assert_ne!(p as usize, i, "PERM 有不動點，建議色會與 idx 的顏色相同");
             assert!(!seen[p as usize]);
             seen[p as usize] = true;
         }
