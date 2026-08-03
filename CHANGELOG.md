@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [v0.3] 2026-08-03
+
 **Render（E1）**
 - `core/render` 落地 wgpu 起手：`Gpu`（Metal-only、零 optional feature）、`RenderContext` 的 attach／resize／detach 狀態機、`DocumentResources` 七資源、`MaskBinding`
 - `T_region` 上傳 round-trip 逐值相等（`E1-wgpu` 驗收第 4 條）；detach 後 `T_paint` 內容不變（第 3 條）；`T_shade` 缺席綁 1×1 白 dummy（第 5 條）
@@ -64,7 +66,7 @@
 - `architecture.md §9`、`roadmap/M0.md`、`docs/README.md` 同步到新契約
 - 診斷報告加座標聚類（`shade-too-dark` 之類的逐像素症狀不再吐 16 個散落座標）與可疑度排序（`line-coverage` 排在它會解釋掉的色標錯誤之前）
 
-## [v0.2]
+## [v0.2] 2026-08-03
 
 **Assets / Baker**
 - 繪師交付改為「線稿＋色標圖」，刪除 flats/reference；Phase 0 需先驗證線稿封閉性
@@ -99,7 +101,7 @@
 - 直式母帶比例更正 3:4（1536×2048），回寫 prd/architecture/assets-spec/roadmap；匯出 letterbox 4:5 不受影響
 - 新增 `ios-scaffold.md`；`baker-core-design` 升 v1.2；architecture §6/§7/§9/§10.1/§12.1 回寫
 
-## v0.1 (2026-08-03)
+## [v0.1] 2026-08-03
 
 - Roadmap 重排：資產分發／解鎖 Worker／手動匯出分別前移 S1/S2/S2b（新增里程碑 W28），S3 縮為 3 週；全線仍 38 週。補漏排的「完成建議與完成動畫」（Must Have）；M0 拆為 M0＋M1
 - 拍板：Settings 升為第五條正式路由；筆刷透明度與吸管都做（回寫 FFI）；iOS 備份採 iCloud Drive ubiquity container；手動匯入／匯出升為 v1 Must Have
