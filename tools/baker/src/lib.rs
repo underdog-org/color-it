@@ -11,6 +11,7 @@ pub mod check;
 pub mod compose;
 pub mod dilate;
 pub mod image;
+pub mod migrate;
 pub mod report;
 pub mod resample;
 pub mod seeds;
