@@ -205,10 +205,39 @@ public final class MockEngine: EngineProtocol {
 
     /// 靜態圖，不是渲染。素材由 App target 提供（`ColorApp/Resources/mock-lineart.png`），
     /// 所以查的是 `Bundle.main`；unit test bundle 裡找不到是正常的，退回純色底。
+    ///
+    /// **Debug 建置會蓋一條浮水印。** 這個 view 沒有 `touchesBegan` 也沒有 render loop，
+    /// 所以跑錯引擎的症狀是「畫面看起來正常，但手指碰下去毫無反應」——那看起來像
+    /// stroke 管線壞了，而不是像選錯 scheme。標出來的成本遠低於再查一次。
     public func makeCanvasView() -> UIView {
         let view = UIImageView(image: UIImage(named: "mock-lineart"))
         view.contentMode = .scaleAspectFit
         view.backgroundColor = .systemBackground
+        #if DEBUG
+            Self.installWatermark(on: view)
+        #endif
         return view
     }
+
+    #if DEBUG
+        private static func installWatermark(on parent: UIView) {
+            let label = UILabel()
+            label.text = "MockEngine — 畫不了。要真的引擎請選 ColorApp (rust) scheme"
+            label.numberOfLines = 0
+            label.textAlignment = .center
+            label.font = .preferredFont(forTextStyle: .caption1)
+            label.textColor = .white
+            label.backgroundColor = .systemRed.withAlphaComponent(0.85)
+            label.translatesAutoresizingMaskIntoConstraints = false
+            parent.addSubview(label)
+            NSLayoutConstraint.activate([
+                label.leadingAnchor.constraint(equalTo: parent.leadingAnchor),
+                label.trailingAnchor.constraint(equalTo: parent.trailingAnchor),
+                label.topAnchor.constraint(equalTo: parent.topAnchor),
+            ])
+            // `UIImageView` 預設不吃觸控，而浮水印是它的 subview——兩邊都不攔輸入，
+            // 所以這條浮水印不會改變任何既有行為。
+            label.isUserInteractionEnabled = false
+        }
+    #endif
 }
