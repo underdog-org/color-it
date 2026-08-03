@@ -17,9 +17,17 @@
 | [specs/naming.md](./specs/naming.md) | 產品名稱決策記錄（為何不叫 Color It）＋ 上架前必補的查證項 | 短 |
 | [specs/ffi-contract.md](./specs/ffi-contract.md) | uniffi 型別與方法表、headless mock、`xtask ios`（S0 Rust 契約**設計**） | 509 行 |
 | [specs/ios-scaffold.md](./specs/ios-scaffold.md) | Xcode 專案佈局、`EngineProtocol` / `MockEngine` / `RustEngineAdapter`、五條路由、Swift 測試與 CI gate（S0 iOS 側） | 短 |
+| [specs/E1-spec-plan.md](./specs/E1-spec-plan.md) | E1 六份 spec 的拆分依據、型別歸屬、撰寫約束（**不是 spec**） | 短 |
+| [specs/E1-wgpu.md](./specs/E1-wgpu.md) | `RenderContext`、`DocumentResources` 七資源、pass ↔ 資源矩陣、mask uniform（**其餘四份只引用**） | 短 |
+| [specs/E1-composite.md](./specs/E1-composite.md) | Pass 3 六層 WGSL、色彩空間、`set_viewport`、擴散動畫 buffer、Mask Mode | 短 |
+| [specs/E1-stroke.md](./specs/E1-stroke.md) | `generate_dabs` 契約、One-Euro ＋ Catmull-Rom、`BrushPreset`、Pass 1／2 | 短 |
+| [specs/E1-bucket.md](./specs/E1-bucket.md) | `document.apply(Op)` 最小版、`tap` → region ID、擴散動畫 CPU 側 | 短 |
+| [specs/E1-input.md](./specs/E1-input.md) | present 路徑定案、FrameDriver、`InputAdapter`、座標系、`cancelStroke` | 短 |
+| [specs/E1-perf.md](./specs/E1-perf.md) | motion-to-photon 流程、記憶體對帳、D2／D3／D4 劇本、調校項總表 | 短 |
 | [contracts.md](./contracts.md) | FFI 的**現況**：表面速查表、語意條款 C1–C8、semver 判定、遷移記錄 | 102 行 |
 
 `roadmap/` 已全部拆檔，一次只讀需要的那一份。
+六份 `E1-*` 也是一組，**先讀 `E1-wgpu`**——其餘五份以它為共同輸入。
 
 ---
 
@@ -59,8 +67,20 @@
 | 動 Xcode 專案、`EngineBridge`、五條路由、Swift 測試 | `specs/ios-scaffold.md` ＋ `apps/ios/README.md` |
 | 某方法現在到底做了什麼、Swift Bridge 能假設什麼 | `contracts.md` ② ③ ★ |
 | FFI 改動算 major 還是 minor、遷移怎麼記 | `contracts.md` ④ ⑤ |
-| 效能目標、量測 | `§13` 效能觀測 |
+| 效能目標、量測 | `§13` 效能觀測 ＋ `specs/E1-perf.md` |
 | 風險與退路 | `§14` |
+
+### E1 面（specs/E1-*.md）
+
+| 何時 | 檔案 |
+|---|---|
+| 動 wgpu 資源、格式、pass 的讀寫權 | `E1-wgpu.md` ★ 六份的共同輸入 |
+| 動 composite、色彩空間、viewport、Mask Mode | `E1-composite.md` |
+| 動筆刷、濾波、插值、`BrushPreset`、Pass 1／2 | `E1-stroke.md` |
+| 動油漆桶、`document.apply`、擴散動畫的推進 | `E1-bucket.md` |
+| 動 iOS 輸入、FrameDriver、座標系 | `E1-input.md` |
+| 要量什麼、怎麼量、D2／D3／D4 怎麼跑 | `E1-perf.md` |
+| 為什麼是這樣切、哪份擁有哪個型別 | `E1-spec-plan.md` |
 
 ### 排程面（roadmap/）
 

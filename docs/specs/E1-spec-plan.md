@@ -19,8 +19,11 @@
 低估的原因是每份都要帶四張固定的表（涵蓋對照、已否決、驗收、回寫清單），
 那四張加起來就 60–80 行，扣掉之後本文只剩不到 100 行的預算——不夠寫決定。
 
-實際：`E1-wgpu` 265、`E1-composite` 257、`E1-stroke` 317。
-`E1-bucket` 與 `E1-input` 應更短（不擁有共用契約），`E1-perf` 約 100 行。
+實際（六份寫完）：`E1-wgpu` 269、`E1-composite` 272、`E1-stroke` 338、
+`E1-bucket` 279、`E1-input` 252、`E1-perf` 219。
+
+`E1-perf` 原估 100 行——低估的原因與前三份相同：那個估計沒算四張固定表，
+而流程文件的表反而更多（裝置、劇本、調校項、版型）。
 
 | 檔 | 涵蓋 `E1.md` 的哪幾組 | crate |
 |---|---|---|
@@ -173,14 +176,20 @@ readback 會很痛，但 CPU 副本要付記憶體，且與 `§4.1.1` 的預算�
 
 ## 合併驗收
 
-- [ ] 六份 spec 寫完並 commit
-- [ ] checklist 對照表的**聯集**蓋滿 `E1.md` 實作清單，零遺漏、零重複宣稱
-- [ ] `E1.md` 八條驗收標準各自能指到某份 spec 的某一節
-- [ ] 三個「必答」有答案：色彩空間、region ID 取法、E1 版記憶體劇本
+- [x] 六份 spec 寫完並 commit
+- [x] checklist 對照表的**聯集**蓋滿 `E1.md` 實作清單，零遺漏、零重複宣稱
+      > 兩處是刻意的分工而非重複：擴散動畫由 `E1-composite`（shader 側）與 `E1-bucket`
+      > （CPU 推進）各認一半，`E1.md` 第 50 行本來就這樣寫；Mask Mode 由 `E1-composite`
+      > 認實作、`E1-perf` 認 D4 的真機比較
+- [x] `E1.md` 八條驗收標準各自能指到某份 spec 的某一節（六條在 `E1-perf`，
+      Mask 決策在 `E1-composite §6` ＋ `E1-perf §5`，決策寫回在各份的最後一張表）
+- [x] 三個「必答」有答案：色彩空間（`E1-composite §2`）、region ID 取法
+      （`E1-wgpu §5.1` ＋ `E1-bucket §4 §8`）、E1 版記憶體劇本（`E1-perf §4`）
 - [ ] 文件回寫：
   - `E1.md`：「iOS `MTKView` ＋ `CADisplayLink`」→ `CAMetalLayer`；補一條 `core/document` 最小 apply
   - `architecture.md §10.3`：`MTKView` vs `CAMetalLayer` 待決項結案
-  - `docs/README.md` 文件地圖 ＋ `CLAUDE.md` 文件索引各加六筆
+  - [x] `docs/README.md` 文件地圖 ＋ `CLAUDE.md` 文件索引各加六筆
+  - 其餘散在六份 spec 各自的最後一張表，**尚未執行**
 
 **不在本輪**：任何 Rust／Swift 實作。實作計畫另由 writing-plans 產出。
 
