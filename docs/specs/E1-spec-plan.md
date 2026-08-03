@@ -15,6 +15,10 @@
 
 放 `docs/specs/`，前綴 `E1-` 讓六份成組。長度預算每份 **120–180 行**，`E1-perf.md` 約 100 行。
 
+> `E1-wgpu.md` 實際寫成 260 行，超出預算。原因是它獨佔四項共用契約（§型別歸屬），
+> 光資源表、pass 矩陣、已否決、回寫清單四張表就佔了近半。**這是唯一允許超出的一份**，
+> 其餘五份只引用不重述，應落在預算內。
+
 | 檔 | 涵蓋 `E1.md` 的哪幾組 | crate |
 |---|---|---|
 | `E1-wgpu.md` | wgpu 起手四條 ＋ `T_region` 解碼上傳 | `render`（新）、`colorpack`（讀） |
@@ -24,20 +28,18 @@
 | `E1-input.md` | 輸入四條 ＋ present 路徑定案 | `apps/ios`、`engine` |
 | `E1-perf.md` | 量測六條 ＋ Mask Mode ＋ D2／D3／D4 | 無（流程文件） |
 
-## 撰寫波次
+## 撰寫順序
 
-`composite` / `stroke` / `bucket` 全部讀寫同一組 GPU 資源。若六份同時平行寫，
-會得到三個互相矛盾的 `DocumentResources` 定義。因此分波：
+`composite` / `stroke` / `bucket` 全部讀寫同一組 GPU 資源，因此
+**`E1-wgpu.md` 必須先定稿**，其餘四份以它為共同輸入；`E1-perf.md` 最後，
+因為它要引用前五份的量測掛鉤。
 
 ```
-Wave 0   E1-wgpu ────────────┐   （序列，定稿後才進 Wave 1）
-                             │
-Wave 1   ┌──────────┬────────┼──────────┬──────────┐
-         composite  stroke  bucket   input        （四份平行）
-         └──────────┴────────┴──────────┘
-                             │
-Wave 2                   E1-perf          （引用前五份的量測掛鉤）
+E1-wgpu ──▶ composite ／ stroke ／ bucket ／ input ──▶ E1-perf
 ```
+
+六份全部在主 thread 依序撰寫，不派 subagent——spec 之間的型別一致性靠的是
+同一個 context 記得前一份寫了什麼，這正是分派出去會失去的東西。
 
 ## 型別歸屬
 
@@ -159,7 +161,7 @@ readback 會很痛，但 CPU 副本要付記憶體，且與 `§4.1.1` 的預算�
 | **present 路徑** | `CAMetalLayer` ＋ 自建 `CADisplayLink` FrameDriver。`MTKView` 列為退路 | 與 `architecture.md §10.3`「渲染不由輸入驅動」一致；wgpu 本來就吃 `CAMetalLayer`；S0 的 `EngineCanvasView` 已是這條路 |
 | **單一寫入口** | E1 建 `document::apply(Op)` 最小版，只支援 `Fill` 與 `BrushStroke`，不接 oplog／history | 鐵律 #3；且 E3 只是在 `apply` 裡多接兩條線，不需要把邏輯從 `engine` 搬出來 |
 
-## subagent 的產出約束
+## 每份 spec 的撰寫約束
 
 - **引用不複製**：指到 `architecture.md §4.2`，不搬原文
 - **每份 spec 開頭一張表**：涵蓋 `E1.md` 的哪幾條 checklist
