@@ -14,6 +14,7 @@ pub mod image;
 pub mod reference;
 pub mod report;
 pub mod resample;
+pub mod seeds;
 pub mod segment;
 pub mod source;
 pub mod synth;
@@ -83,9 +84,6 @@ pub fn bake(dir: &Path, opts: &BakeOptions) -> Result<Report> {
 
     let (geometry, aspect) = check::master::geometry(&named);
 
-    // 只有 size-mismatch 必須提早停——四張圖尺寸不一致時逐像素的檢查會越界。
-    // canvas-size 單獨命中時像素檢查完全跑得動，照 §4.2「階段內不 fail-fast」跑完，
-    // 否則繪師改完尺寸重交，才會第一次看到縫隙問題。
     let size_mismatch = geometry.iter().any(|d| d.code == code::SIZE_MISMATCH);
     diagnostics.extend(geometry);
     diagnostics.extend(check::master::color_space(&named));
@@ -99,9 +97,6 @@ pub fn bake(dir: &Path, opts: &BakeOptions) -> Result<Report> {
 
     // ── 母帶階段 ────────────────────────────────────────────────────
     let (flats_diags, unique_colors) = check::master::flats(&flats);
-    // 唯一色數爆掉代表圖徹底壞掉，connected components 會切出幾百萬區——只有這一條
-    // 必須提早停。tiny-color-area / reserved-color / unassigned-pixel 都不影響
-    // label_regions，讓 ref-mismatch 也一次交出去。
     let unique_color_overflow = flats_diags
         .iter()
         .any(|d| d.code == code::UNIQUE_COLOR_OVERFLOW);
@@ -173,9 +168,6 @@ pub fn bake(dir: &Path, opts: &BakeOptions) -> Result<Report> {
         return finish(report, opts);
     }
 
-    // §2：`region_count` 與 `difficulty` 一律依**輸出解析度**判定。走到這裡
-    // region-count-drift（Error）已擋掉「有區域在輸出消失」，兩數必然相等——
-    // 但取值直接照規格，不靠另一條檢查維持的不變式。
     let region_count = stats.area.iter().filter(|&&a| a > 0).count() as u32;
     debug_assert_eq!(region_count, regions.count, "region-count-drift 應已擋下");
 
@@ -256,11 +248,6 @@ mod tests {
     const H: u32 = 64;
 
     /// 一張同時踩到四條**互相獨立**檢查的素材
-    /// 同時踩到四條**互相獨立**檢查的素材：`canvas-size`（64×64）、
-    /// `unassigned-pixel`（一個 alpha 0 的洞）、`reserved-color`（右半是 #FF00FF）、
-    /// `ref-mismatch`（左區裡塗第二個顏色）。
-    ///
-    /// 沒有一條會讓別條算不出來，所以報告必須四條全含。
     fn four_independent_problems() -> Asset {
         let mut flats = Vec::with_capacity((W * H * 4) as usize);
         let mut reference = Vec::with_capacity((W * H * 4) as usize);
