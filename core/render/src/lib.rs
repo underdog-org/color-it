@@ -4,6 +4,7 @@
 
 mod composite;
 mod context;
+mod erase;
 mod error;
 mod fill;
 mod gpu;
@@ -12,8 +13,9 @@ mod resources;
 
 pub use composite::{CompositePass, Frame, Transform};
 pub use context::{RenderContext, SURFACE_FORMAT, SurfaceHandle};
+pub use erase::ErasePass;
 pub use error::RenderError;
-pub use fill::{FILL_ANIM_SIZE, FillAnim};
+pub use fill::{FILL_ANIM_SIZE, FILL_DURATION, Fill, FillAnim, FillAnimator, ease_out, encode};
 pub use gpu::{Gpu, MIN_TEXTURE_DIMENSION_2D};
 pub use mask::{MaskBinding, MaskMode, MaskUniform};
 pub use resources::DocumentResources;

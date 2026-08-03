@@ -6,10 +6,14 @@
 //! detach_surface()       → 只丟 Surface
 //! ```
 
+use std::time::Instant;
+
 use colorpack::ColorPack;
 
 use crate::composite::{CompositePass, Frame};
+use crate::erase::ErasePass;
 use crate::error::RenderError;
+use crate::fill::{Fill, FillAnimator, encode};
 use crate::gpu::{Gpu, instance_descriptor};
 use crate::mask::{MaskBinding, MaskUniform};
 use crate::resources::DocumentResources;
@@ -40,7 +44,12 @@ pub struct RenderContext {
     /// Pass 2 與 Pass 3 共用，所以住在 context 不住在任一個 pass（`E1-wgpu §7.1`）。
     mask: Option<MaskBinding>,
     composite: Option<CompositePass>,
+    erase: Option<ErasePass>,
     attached: Option<Attached>,
+    /// 擴散動畫的 CPU 側（`E1-bucket §7`）。`document` 對它一無所知。
+    fill_anim: FillAnimator,
+    /// `render` 沒有時間參數也不擴 FFI（§7.2），dt 由這裡的兩次呼叫差算出。
+    last_frame: Option<Instant>,
 }
 
 impl RenderContext {
@@ -52,7 +61,10 @@ impl RenderContext {
             resources: None,
             mask: None,
             composite: None,
+            erase: None,
             attached: None,
+            fill_anim: FillAnimator::new(),
+            last_frame: None,
         }
     }
 
@@ -74,6 +86,9 @@ impl RenderContext {
             .composite
             .get_or_insert_with(|| CompositePass::new(gpu, SURFACE_FORMAT, mask));
         composite.bind_document(gpu, resources);
+
+        let erase = self.erase.get_or_insert_with(|| ErasePass::new(gpu));
+        erase.bind_document(gpu, resources);
         Ok(())
     }
 
@@ -130,10 +145,74 @@ impl RenderContext {
         self.attached = None;
     }
 
-    /// 一個 frame：Pass 3 Composite。Pass 1／2 由 `E1-stroke` 插在它前面。
+    /// 把 `document::Effect::Filled` 翻譯成 GPU 動作（`E1-bucket §3` 的第二段箭頭）。
+    ///
+    /// 三件事一起發生，缺一個都會在畫面上看得出來：寫 `Buf_palette`、清該區的
+    /// `T_erase`（§6）、起一筆擴散動畫（§7）。`origin` 是 tap 的**畫布**像素座標。
+    ///
+    /// `document` 不呼叫這個函式——`deps-policy.toml` 禁止它看見 `render`，
+    /// 中間永遠隔著 `engine`。
+    pub fn fill(
+        &mut self,
+        region_id: u32,
+        color: [u8; 4],
+        prev: [u8; 4],
+        bbox: [u32; 4],
+        origin: [f32; 2],
+    ) {
+        let (Some(gpu), Some(res), Some(erase)) = (
+            self.gpu.as_ref(),
+            self.resources.as_ref(),
+            self.erase.as_ref(),
+        ) else {
+            return;
+        };
+
+        // alpha 恆為 1.0：填色即不透明，`a == 0` 只用來表示「從未填過」（§5）。
+        let color = encode(color);
+        res.write_palette(gpu, region_id, color);
+        erase.clear_region(gpu, res, region_id, bbox);
+        self.fill_anim.begin(
+            gpu,
+            res,
+            Fill {
+                region_id,
+                origin,
+                bbox,
+                color,
+                prev: encode(prev),
+            },
+        );
+    }
+
+    /// 還有擴散動畫在跑——FrameDriver 用它決定要不要繼續出 frame（`E1-input`）。
+    pub fn is_animating(&self) -> bool {
+        self.fill_anim.is_animating()
+    }
+
+    /// 一個 frame。dt 由內部的 `Instant` 取兩次呼叫的差（§7.2）——
+    /// **不擴 FFI**，每 frame 都要傳的東西進 FFI 只會變成 Bridge 的另一個出錯點。
+    pub fn render(&mut self, frame: Frame) -> Result<(), RenderError> {
+        let now = Instant::now();
+        let dt = self
+            .last_frame
+            .replace(now)
+            .map_or(0.0, |prev| now.duration_since(prev).as_secs_f32());
+        self.render_with_dt(frame, dt)
+    }
+
+    /// 一個 frame：推進動畫 ＋ Pass 3 Composite。Pass 1／2 由 `E1-stroke` 插在它前面。
     ///
     /// 沒有 surface（App 切到背景）時直接回 `Ok`——資源都還在，回前台就能繼續畫（C5）。
-    pub fn render(&mut self, frame: Frame) -> Result<(), RenderError> {
+    ///
+    /// 真正的實作吃 dt，`render` 是它的 wrapper：測試呼叫這一支，不需要 mock 框架。
+    pub fn render_with_dt(&mut self, frame: Frame, dt: f32) -> Result<(), RenderError> {
+        if let (Some(gpu), Some(res)) = (self.gpu.as_ref(), self.resources.as_ref()) {
+            // 動畫先於 surface 檢查推進：背景時沒有 frame 會來，但一旦回前台，
+            // 進行中的那幾筆不該從舊的 progress 重播。
+            self.fill_anim.advance(gpu, res, dt);
+        }
+
         let (Some(gpu), Some(composite), Some(mask), Some(attached)) = (
             self.gpu.as_ref(),
             self.composite.as_ref(),

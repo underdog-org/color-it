@@ -454,7 +454,9 @@ let base = mix(f.prev_color, palette[id], t);    // 併進 composite 第 ① 層
 動畫的起點無從得知——只能從新顏色跳變，或錯誤地從白紙淡入。有了它，「從未填色 /
 首次填色 / 重新填色」三種情況用同一條式子涵蓋（`specs/E1-composite.md §5`）。
 
-**`max_radius` 是 per-tap 的，不是 per-region 的。** `fill_origin` 是點擊處，所以「離 origin 最遠的距離」隨每次點擊而變。實作上以 region bbox 的對角線作為近似即可（保守地略大，寧可動畫早一點結束）。
+**`max_radius` 是 per-tap 的，不是 per-region 的。** `fill_origin` 是點擊處，所以「離 origin 最遠的距離」隨每次點擊而變。取 **origin 到 bbox 四個角的最大距離**——bbox 對角線在 origin 靠近某個角落時不夠大，動畫會在覆蓋對角另一端之前就結束，視覺上是「填到一半就停了」（`specs/E1-bucket.md §7.4`）。
+
+**動畫曲線與時長**：ease-out cubic `p = 1 - (1 - t)³`，**180 ms**（初值，實機調校列入 `specs/E1-perf.md`）。CPU 每 frame 只推進進行中的 entry，`p` 到 1 之後停止寫入。
 
 > **已知的視覺限制**：對細長區域（葉子、花瓣、緞帶），從點擊處做圓形擴散會有明顯的「追趕感」——最遠的角落最後才填到。真正的解法是沿區域內測地距離擴散，成本高一個量級。**先做圓形近似，在 E1 實機看過再決定是否值得。**
 
@@ -518,7 +520,7 @@ pub struct Curve { pub min: f32, pub max: f32, pub gamma: f32 }
 
 **產品需求**：Gallery 的進度環與完成建議，定義見 `prd.md §5.2`——已上色區域數 ÷ 總區域數，「已上色」＝ 油漆桶填過 **或** 該區域筆刷覆蓋率 > 50%。
 
-油漆桶的部分是 CPU 側資料（`palette`），直接數即可，零成本。**筆刷的部分需要 per-region 覆蓋率統計**：
+油漆桶的部分是 CPU 側資料（`palette`），直接數即可，零成本。**這個數的真相在 `document.colored_regions()`**——`engine` 把它投影進 `AppState`，`app-state` 不自己遞增（`specs/E1-bucket.md §2`）。**筆刷的部分需要 per-region 覆蓋率統計**：
 
 ```wgsl
 // compute shader，每個 workgroup 處理一塊 tile

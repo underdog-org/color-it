@@ -163,7 +163,7 @@ E2 只是讓 `Transform` 開始變動。
 ```wgsl
 struct FillAnim {
     origin:     vec2<f32>,   // 點擊處，畫布像素座標
-    max_radius: f32,         // region bbox 對角線（保守略大，寧可早結束）
+    max_radius: f32,         // origin 到 bbox 四角的最大距離（`E1-bucket §7.4`）
     progress:   f32,         // 0..1，CPU 每 frame 更新
     prev_color: vec4<f32>,   // 這次填色之前該區域的顏色
 }
@@ -184,6 +184,9 @@ struct FillAnim {
 **per-tap 而非 per-region**（`§4.5`）：`origin` 與 `max_radius` 每次 tap 都重寫。
 同一區被連點兩次，第二次的動畫從第一次的**當前插值結果**起算——
 `E1-bucket` 負責把它寫進 `prev_color`。
+
+**`max_radius` 不是 bbox 對角線**，是 origin 到 bbox 四角的最大距離——對角線在
+origin 靠近某個角落時不夠大，擴散會在動畫結束時仍未覆蓋對角的另一端（`E1-bucket §7.4`）。
 
 **更新成本**：CPU 每 frame 只對**進行中**的 entry 做 `queue.write_buffer`（32 bytes ×
 進行中筆數），不是整個 2 MB。`progress` 到 1 之後停止寫入。動畫推進的時間軸歸 `E1-bucket`。

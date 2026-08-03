@@ -37,6 +37,13 @@ impl Transform {
             ty: (sh - ch * scale) / 2.0,
         }
     }
+
+    pub fn canvas_pos(&self, screen: [f32; 2]) -> [f32; 2] {
+        [
+            (screen[0] - self.tx) / self.scale,
+            (screen[1] - self.ty) / self.scale,
+        ]
+    }
 }
 
 /// 每 frame 更新的 composite 參數。
@@ -44,8 +51,6 @@ impl Transform {
 pub struct Frame {
     pub transform: Transform,
     pub screen_size: [u32; 2],
-    /// 畫布外的背景色，編碼值 RGBA。**不要用 `PAPER_WHITE`**——
-    /// 否則使用者分不出畫布邊界在哪（§4）。由 `set_viewport` 一併帶入。
     pub background: [f32; 4],
     /// 進行中筆畫的顏色，編碼值 RGBA、straight alpha。
     ///

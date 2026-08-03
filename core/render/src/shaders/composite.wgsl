@@ -28,6 +28,8 @@ struct Frame {
     tx: f32,
     ty: f32,
     _pad: f32,
+    /// shader 不再用它（`canvas_pos` 改吃 `@builtin(position)`），但 `Frame`
+    /// 的佈局與 Rust 端一一對應，拿掉會讓後面的欄位全部錯位。
     screen_size: vec2<f32>,
     canvas_size: vec2<f32>,
     /// 畫布外的背景色。**不是 PAPER_WHITE**，否則看不出畫布邊界（§4）。
@@ -49,26 +51,21 @@ struct Frame {
 @group(1) @binding(0) var<uniform> m: MaskUniform;
 @group(2) @binding(0) var<uniform> frame: Frame;
 
-struct VsOut {
-    @builtin(position) pos: vec4<f32>,
-    /// 螢幕 UV，左上原點。
-    @location(0) uv: vec2<f32>,
-}
-
 /// Full-screen triangle：不綁 vertex buffer，`draw(0..3)`。
 /// 覆蓋整個 clip space 的單一三角形，比 quad 少一條對角線上的重複 rasterize。
 @vertex
-fn vs_main(@builtin(vertex_index) i: u32) -> VsOut {
+fn vs_main(@builtin(vertex_index) i: u32) -> @builtin(position) vec4<f32> {
     let uv = vec2<f32>(f32((i << 1u) & 2u), f32(i & 2u));
-    var out: VsOut;
-    out.uv = uv;
-    out.pos = vec4<f32>(uv * vec2<f32>(2.0, -2.0) + vec2<f32>(-1.0, 1.0), 0.0, 1.0);
-    return out;
+    return vec4<f32>(uv * vec2<f32>(2.0, -2.0) + vec2<f32>(-1.0, 1.0), 0.0, 1.0);
 }
 
-/// screen UV → 畫布像素座標（浮點；整數化與邊界判斷由呼叫端做）。
-fn canvas_pos(uv: vec2<f32>) -> vec2<f32> {
-    return (uv * frame.screen_size - vec2<f32>(frame.tx, frame.ty)) / frame.scale;
+/// 螢幕像素 → 畫布像素座標（浮點；整數化與邊界判斷由呼叫端做）。
+///
+/// **吃 `@builtin(position)` 而不是內插出來的 UV**：UV 要再乘一次 `screen_size`
+/// 才回到像素，而 `x / w * w` 在 f32 下不保證等於 `x`——差的那個 ulp 會讓
+/// 邊界像素 floor 到隔壁區，於是 shader 與 `Transform::canvas_pos` 對不上（`E1-bucket §4.2`）。
+fn canvas_pos(screen: vec2<f32>) -> vec2<f32> {
+    return (screen - vec2<f32>(frame.tx, frame.ty)) / frame.scale;
 }
 
 /// Mode B 恆回 1.0，也就是完全不遮罩（§6）。
@@ -88,8 +85,8 @@ fn tint(coverage: f32, color: vec4<f32>) -> vec4<f32> {
 }
 
 @fragment
-fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
-    let p = canvas_pos(in.uv);
+fn fs_main(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
+    let p = canvas_pos(pos.xy);
 
     // 畫布外：只寫背景色，不讀任何貼圖（§4／§7）。
     if p.x < 0.0 || p.y < 0.0 || p.x >= frame.canvas_size.x || p.y >= frame.canvas_size.y {

@@ -119,10 +119,14 @@ impl DocumentResources {
             U::TEXTURE_BINDING | U::RENDER_ATTACHMENT,
         );
 
+        // COPY_SRC 只為了 `E1-bucket §10` 的可驗證性（「逐位元不變」要讀得回來）；
+        // usage flag 不影響記憶體。
         let palette = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Buf_palette"),
             size: u64::from(pack.manifest.region_count) * PALETTE_ENTRY_SIZE,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::COPY_SRC,
             mapped_at_creation: false,
         });
 
@@ -131,7 +135,9 @@ impl DocumentResources {
         let fill = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Buf_fill"),
             size: u64::from(pack.manifest.region_count) * FILL_ANIM_SIZE,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::COPY_SRC,
             mapped_at_creation: false,
         });
 
@@ -213,6 +219,23 @@ impl DocumentResources {
     /// `bbox` 給 `E1-bucket` 清 `T_erase` 用。
     pub fn regions(&self) -> &[RegionEntry] {
         &self.regions
+    }
+
+    /// 畫布像素座標 → region ID，O(1)（`E1-bucket §4.3`）。
+    ///
+    /// `Transform::canvas_pos` 的輸出直接餵進來。**畫布外回 `None`，不 clamp**——
+    /// clamp 會讓畫布外的誤觸填到邊緣區域。`tap` 與 `begin_stroke` 的
+    /// `active_region_id` 走的是同一條路徑（§4.4）。
+    pub fn region_at(&self, canvas: [f32; 2]) -> Option<u32> {
+        let [w, h] = self.canvas_size;
+        let (x, y) = (canvas[0].floor(), canvas[1].floor());
+        // `Range::contains` 對 NaN 回 false，於是 scale 為 0 產生的 NaN 也算畫布外。
+        if !(0.0..w as f32).contains(&x) || !(0.0..h as f32).contains(&y) {
+            return None;
+        }
+        Some(u32::from(
+            self.region_ids[y as usize * w as usize + x as usize],
+        ))
     }
 }
 

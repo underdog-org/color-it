@@ -32,7 +32,7 @@ S0 驗收「`EngineProtocol.swift` 與 Rust FFI 表面逐一對照無缺漏」�
 | `pick_color(x, y)` | — | `engine.rs` | 回傳 `AppState.color`，座標忽略（見 C6） |
 | `begin_stroke(s)` / `end_stroke()` / `cancel_stroke()` | — | `engine.rs` | 只維護 `Inner::stroke_active`，樣本丟棄 |
 | `append_samples(s)` | — | `engine.rs` | 樣本丟棄；不 emit（stroke 狀態不在 `UiState` 裡） |
-| `tap(x, y)` | — | `app-state` | 推進 `colored_regions`，到 `total_regions`（S0 固定 24）飽和 |
+| `tap(x, y)` | — | `app-state` | 推進 `colored_regions`，到 `total_regions`（S0 固定 24）飽和。**E1 起失效**：改成 `T_region` 查表 → `document.apply(Op::Fill)`，`colored_regions` 由 `document` 投影（`specs/E1-bucket.md §2` §4） |
 | `undo()` / `redo()` | — | `engine.rs` | no-op ＋ 一次性 log（E3） |
 | `render()` | — | `engine.rs` | no-op ＋ 一次性 log（E1） |
 | `set_viewport(transform)` | — | `engine.rs` | no-op ＋ 一次性 log；`Transform` 丟棄，`Inner` 沒有 viewport 欄位（E1） |
@@ -74,6 +74,7 @@ Swift 端不會想每 frame `try`。表上沒有 `makeCanvasView()`，那是 Bri
 | C6 | `pick_color` 同步回傳，接受抬筆時約一 frame 的 stall（S1 實作時複審） |
 | C7 | `makeCanvasView()` 屬 Bridge（包 `MTKView` 並呼叫 `attach_surface`），不在 FFI——對照表上不算缺漏 |
 | C8 | `UiState` 回呼只在投影結果**真的改變**時發送；連續兩次相同狀態只會收到一次 |
+| C9 | `tap` / `begin_stroke` / `pick_color` 的座標單位是**螢幕像素**，不是 UIKit point——乘 `contentsScale` 是 Bridge 的責任（`specs/E1-bucket.md §4.1`） |
 
 C8 的兩個後果，Bridge 必須知道：
 

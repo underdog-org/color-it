@@ -12,6 +12,14 @@
 - **修正 spec**：`T_line`／`T_shade` 以畫布 UV 取樣而非螢幕 UV（letterbox 時才會顯形，已用左右異色線稿釘住）
 - 回寫 `architecture.md`：§4.2 `erased` 的套用位置＋色彩空間、§4.4 Mode B 改為無條件通過（`REGION_LINEART` 不存在）、§4.5 擴散動畫補 `prev_color`
 
+**Bucket（E1）**
+- `core/document` 落地最小 apply：`Op::Fill`／`Effect::Filled`（帶 `prev` 與 `bbox`）、palette `a == 0` 即未填色、`colored_regions` 成為進度的真相。純 CPU，`deps-policy` 不動
+- `core/render` 補上 `Fill` 那一列：`Transform::canvas_pos`＋`DocumentResources::region_at`（O(1)、畫布外不 clamp）、`ErasePass`（scissor 至 bbox、以 `T_region` 為 mask、`discard`）、`FillAnimator`（ease-out cubic 180ms、連點取當前插值色）、`render_with_dt` 與 `render` 的 wrapper 關係
+- **修正既有實作**：composite shader 的 `canvas_pos` 改吃 `@builtin(position)`——UV 再乘一次 `screen_size` 差一個 ulp，邊界像素會 floor 到隔壁區；由 20×12 螢幕逐點比對 Rust 孿生體釘住
+- `Buf_palette`／`Buf_fill` 加 `COPY_SRC`（`E1-bucket §10` 的「逐位元不變」要讀得回來）
+- 回寫 `architecture.md` §4.5（`max_radius` 取四角最大距離、曲線與時長）與 §4.7（進度真相在 `document`）、`E1-composite.md §5`、`contracts.md` ②＋新增 C9（座標單位＝螢幕像素）
+- `engine` 的 `tap` 接線仍是 S0 mock，歸 `E1-input`
+
 **Stroke（E1）**
 - `core/stroke` 落地 `E1-stroke` §3–§6／§10：`Vec2`／`InputSample`／`Dab`／`Curve`／`BrushPreset` 十四欄＋五支 preset 登記、One-Euro（位置與 radius 各一組參數）、向心 Catmull-Rom（`alpha = 0.5`）、跨 segment 保留累積量的弧長取樣、`majorRadius` per-stroke 自適應正規化
 - **`StrokeBuilder`（串流）與 `generate_dabs`（批次）共用同一份實作**，§2.1 的等價因此由建構保證；等價與「同 seed 逐位元相同」設為 gate
