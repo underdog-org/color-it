@@ -128,8 +128,11 @@ seed，但 jitter 恆 0 時 seed 走哪條路沒被測過。啟用後若 RNG 的
 
 **必答 E**｜**MRT 兩個 attachment 格式不同**（`T_paint` RGBA8、`T_erase` R8）、
 blend state 也不同（destination-out vs additive），wgpu／Metal 是否支援同 pass 雙寫。
-**不支援就要拆成兩個 pass**，而那會讓 `§4.1.2` 那張表的「Draw call 代價：零」失效。
-這是架構文件裡一個從未被驗證的斷言，**寫本份 spec 前先跑一個 headless 小測試確認**。
+
+> ✅ **已驗證（2026-08-03）**：`core/render/tests/mrt_probe.rs` 在 headless Metal 上
+> 通過——同 pass 兩個 attachment、格式與 blend state 各自獨立，讀回值符合預期。
+> `§4.1.2` 的「Draw call 代價：零」成立，`E2-commit` 第 4 節照原路徑寫。
+> **保留**：跑的是 macOS 的 Metal backend，iOS 真機在 E2 實作時順帶再驗一次。
 
 ### `E2-viewport.md`
 
