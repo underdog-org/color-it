@@ -16,6 +16,7 @@
 | [specs/naming.md](./specs/naming.md) | 產品名稱決策記錄（為何不叫 Color It）＋ 上架前必補的查證項 | 短 |
 | [specs/ffi-contract.md](./specs/ffi-contract.md) | uniffi 型別與方法表、headless mock、`xtask ios`（S0 Rust 契約**設計**） | 509 行 |
 | [specs/E2-spec-plan.md](./specs/E2-spec-plan.md) | E2 四份 spec 的拆分依據與撰寫契約（**里程碑期間有效，收尾後刪除**） | 220 行 |
+| [specs/E2-brush.md](./specs/E2-brush.md) | 三張 tip、五支 preset 的差異軸、velocity 啟用、RNG 契約與 golden（**里程碑期間有效，收尾後刪除**） | 264 行 |
 | [perf-baseline.md](./perf-baseline.md) | **效能量測方法 ＋ 實測數字**：m2p 流程、對帳、D2／D3／D4 劇本、調校記錄 | 短 |
 | [contracts.md](./contracts.md) | FFI 的**現況**：表面速查表、語意條款 C1–C13、semver 判定、遷移記錄 | 短 |
 
