@@ -1,0 +1,6 @@
+# 由 `cargo xtask ios` 產生，請勿手改。見 docs/specs/ffi-contract.md §6。
+# 產物是 gitignore 的，這個檔是它唯一的基準：hash 涵蓋 bindgen 的三個文字產物
+# （.swift / FFI.h / module.modulemap），不含 .xcframework。
+# 這裡的 diff 即「FFI 表面變了」，請順手確認 docs/contracts.md 有跟上。
+uniffi = "0.29.5"
+swift_sources_sha256 = "ed48d6035097cfc7fe9abeab797a10498a7339026bcea5f0cd3ffc89005e7f92"

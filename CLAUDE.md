@@ -3,11 +3,10 @@
 iOS 著色 App。核心是「**受區域約束的塗抹**」——不是繪圖軟體。
 單人開發，v1 只有 iOS，38 週零 buffer。
 
-**當前**：M0 收尾（W0–1，見 `docs/roadmap/M0.md`）。基建與規格已定，`core/*` 仍是空殼。
+**當前**：S0 契約定義（W4，見 `docs/roadmap/S0.md`）。Rust 側已落地——`core/engine` 是 headless mock，FFI 表面與語意條款記在 `docs/contracts.md`；iOS 骨架（Xcode 專案、`EngineProtocol` / `MockEngine`、五條路由）未開工。
 **M0 未結的兩件事**：`adventure-time-demo-1/flats.png` 待重做、繪師徵才 JD 待發。
 
 > 產品原名 `Color It`，2026-08-03 因商標衝突改名 **Colorlull**（`docs/specs/naming.md`）。
-> crate 前綴一併改為 `colorlull-*`，`lib.name` 短名不變（仍是 `use render::…`）。
 > 目錄名 `color-it/` 尚未改，`architecture.md §3` 的結構圖照現況寫。
 
 ## Bootstrapping
@@ -17,7 +16,7 @@ iOS 著色 App。核心是「**受區域約束的塗抹**」——不是繪圖�
 - 當前任務與 DoD → `docs/roadmap/<里程碑>.md`（單檔 40–90 行）
 - 找某個主題 → 用 `docs/README.md` 定位章節，`grep -n '^## 4\.'` 取行號後 `Read` 帶 offset/limit
 - 跨文件查證、要掃多節 → 派 `Explore` subagent，**只讓結論回主 context**
-- 原始碼結構、符號、呼叫鏈 → codebase-memory MCP（M0 尚無程式碼，暫不適用）
+- 原始碼結構、符號、呼叫鏈 → codebase-memory MCP
 
 **判準：能用 subagent 或圖查詢回答的，不要把原文搬進主 context。**
 
@@ -56,4 +55,5 @@ mise 管工具鏈｜建置一律走 `cargo xtask`｜commit `type(scope): subject
 ## 常查
 
 判斷提案是否違反產品定位 → `prd.md §3`｜某邏輯該放哪一層 → `architecture.md §6`｜
-「這看起來像 bug」→ 先查 `prd.md §10`｜**完整索引 → `docs/README.md`**
+「這看起來像 bug」→ 先查 `prd.md §10`｜FFI 某方法現在做什麼、改動算不算 major → `docs/contracts.md`｜
+**完整索引 → `docs/README.md`**

@@ -38,11 +38,16 @@ M0 的 crate 全是空殼：`Cargo.toml` ＋ 空 `lib.rs`，**但依賴邊要照
 代價是 CI cold build 多兩三分鐘（有 cache 後不痛），
 換來「wgpu 只在 render」這條規則從第一天就有正例，而不是一條從未被行使的規則。
 
-### `document → history` 的懸而未決
+### 兩條懸而未決的邊
 
-§5.1 的依賴圖上沒有這條邊，但同節內文說 `document` 是協調者、
-要把 `UndoEntry` 送進 `history`。M0 不解這題——policy 檔照圖寫。
-等 E3 真的需要連的時候，「必須先改 policy 檔」正是逼這個決策浮上檯面的機制。
+| 邊 | 為什麼可能需要 | 何時揭曉 |
+|---|---|---|
+| `document → history` | §5.1 的依賴圖上沒有，但同節內文說 `document` 是協調者、要把 `UndoEntry` 送進 `history` | E3 |
+| `engine → stroke` | `ffi::InputSample` → `stroke::InputSample` 的轉換需要 `engine` 認識 `stroke`，依賴圖上同樣沒這條邊 | E1 |
+
+兩條都不預先開通——policy 檔照 §5.1 的圖寫。
+等真的需要連的時候，「必須先改 policy 檔」正是逼這個決策浮上檯面的機制。
+S0 沒踩到第二條：headless mock 沒有東西消費 samples，只定義 DTO、不寫轉換。
 
 ## 3. `xtask lint-deps`
 
@@ -82,13 +87,13 @@ M0 驗收「刻意在 `stroke` 加 wgpu 依賴時 lint 會失敗」**做成 xtas
 
 ## 4. xtask 指令位
 
-| 指令 | M0 狀態 |
+| 指令 | 狀態 |
 |---|---|
-| `lint-deps` | 實作（alias 定義在 `.cargo/config.toml`） |
-| `gen-torture` | 實作。決定性產生 `assets/source/torture-01/`，重跑逐位元相同（否則 LFS 每跑一次胖一份） |
+| `lint-deps` | M0 實作（alias 定義在 `.cargo/config.toml`） |
+| `gen-torture` | M0 實作。決定性產生 `assets/source/torture-01/`，重跑逐位元相同（否則 LFS 每跑一次胖一份） |
 | `bake <dir>` | 指令位，body 回傳「M1 實作」錯誤訊息 |
-| `ios` | 指令位，同上（S0） |
-| `verify-generated` | 指令位，同上（S0） |
+| `ios` | **S0 實作**。host cdylib 生 Swift binding ＋ 兩個 iOS `.a` 打包 `.xcframework`，重算 `core/engine/ffi-lock.toml` |
+| `verify-generated` | **S0 實作**。重新生成後比對 `ffi-lock.toml` 指紋，跑在 Linux（見 `specs/ffi-contract.md §6`） |
 
 用 clap 定義。**不用 `todo!()`**——要的是明確錯誤訊息，不是 panic。
 
@@ -113,6 +118,8 @@ M0 驗收「刻意在 `stroke` 加 wgpu 依賴時 lint 會失敗」**做成 xtas
 - `.gitignore`：`/target`、`assets/packs/`、`apps/*/Generated/`、`apps/*/generated/`、`.DS_Store`
 - git-lfs 加進 `mise.toml`（目前未安裝），跟 kotlin / rust 一致由 mise 管
 - **toolchain 版本的 SSOT 是 `rust-toolchain.toml`**，mise 只負責把 rustup 裝起來——避免兩邊各 pin 一次
+- S0 起 `rust-toolchain.toml` 多一行 `targets = ["aarch64-apple-ios", "aarch64-apple-ios-sim"]`。
+  代價是 Linux CI 也會裝兩份用不到的 std（幾十 MB），換來本機少一個「沒寫在任何地方的前置步驟」
 
 ## 不做
 

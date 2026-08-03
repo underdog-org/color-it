@@ -13,8 +13,13 @@ workspace = true
 
 [dependencies]
 anyhow = { workspace = true }
+camino = { workspace = true }
 clap = { workspace = true }
 png = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+sha2 = { workspace = true }
 toml = { workspace = true }
+# 當 library 連進來，不 shell out——`uniffi` 的 cli feature 只給得到會自己解析 argv
+# 並在出錯時 process::exit(1) 的 uniffi_bindgen_swift()，在 xtask 裡不能用。
+uniffi_bindgen = { workspace = true }

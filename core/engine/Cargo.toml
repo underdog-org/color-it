@@ -6,6 +6,9 @@ publish.workspace = true
 
 [lib]
 name = "engine"
+# staticlib 給 xcframework、cdylib 給 library-mode bindgen、lib 給 workspace 內的測試。
+# 三種都要，見 docs/specs/ffi-contract.md §4。
+crate-type = ["lib", "staticlib", "cdylib"]
 
 [lints]
 workspace = true
@@ -15,3 +18,5 @@ colorlull-app-state = { workspace = true }
 colorlull-document = { workspace = true }
 colorlull-history = { workspace = true }
 colorlull-render = { workspace = true }
+thiserror = { workspace = true }
+uniffi = { workspace = true }

@@ -15,6 +15,8 @@ use crate::policy::CrateManifest;
 struct Metadata {
     packages: Vec<Package>,
     workspace_root: PathBuf,
+    /// 由 cargo 給，而非寫死 `<root>/target`——CARGO_TARGET_DIR 會改變它。
+    target_directory: PathBuf,
 }
 
 #[derive(Deserialize)]
@@ -30,6 +32,7 @@ struct Dependency {
 
 pub struct Workspace {
     pub root: PathBuf,
+    pub target_dir: PathBuf,
     pub manifests: Vec<CrateManifest>,
 }
 
@@ -81,6 +84,7 @@ pub fn load() -> Result<Workspace> {
 
     Ok(Workspace {
         root: metadata.workspace_root,
+        target_dir: metadata.target_directory,
         manifests,
     })
 }

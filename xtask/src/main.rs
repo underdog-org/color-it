@@ -1,5 +1,6 @@
 //! Colorlull 的建置協調。指令清單見 `docs/architecture.md §12.1`。
 
+mod ios;
 mod metadata;
 mod policy;
 mod torture;
@@ -42,10 +43,8 @@ fn main() -> Result<()> {
         Command::Bake { .. } => {
             bail!("cargo xtask bake 尚未實作（M1）。流程見 docs/architecture.md §9.2")
         }
-        Command::Ios => bail!("cargo xtask ios 尚未實作（S0）。見 docs/architecture.md §12.1"),
-        Command::VerifyGenerated => {
-            bail!("cargo xtask verify-generated 尚未實作（S0）。見 docs/architecture.md §12.1")
-        }
+        Command::Ios => ios::run(&metadata::load()?),
+        Command::VerifyGenerated => ios::verify_generated(&metadata::load()?),
     }
 }
 

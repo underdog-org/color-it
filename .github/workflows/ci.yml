@@ -1,7 +1,5 @@
 name: CI
 
-# 觸發路徑：architecture.md §12.3 的三條，外加 xtask、workspace manifest 與本檔自身。
-# 少了後三者，改 deps-policy.toml 或 CI 設定本身不會被驗——實際會咬人的漏洞。
 # （GitHub Actions 不支援 YAML anchor，兩份清單只能各寫一次，改動時要同步。）
 on:
   push:
@@ -10,6 +8,7 @@ on:
       - "core/**"
       - "tools/baker/**"
       - "contracts/**"
+      - "apps/ios/**"
       - "xtask/**"
       - "Cargo.toml"
       - "Cargo.lock"
@@ -20,6 +19,7 @@ on:
       - "core/**"
       - "tools/baker/**"
       - "contracts/**"
+      - "apps/ios/**"
       - "xtask/**"
       - "Cargo.toml"
       - "Cargo.lock"
@@ -57,8 +57,53 @@ jobs:
       - name: lint-deps
         run: cargo xtask lint-deps
 
+      - name: verify-generated
+        run: cargo xtask verify-generated
+
       - name: test
         run: cargo test --workspace
 
       - name: build
         run: cargo build --workspace
+
+
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      ios: ${{ steps.filter.outputs.ios }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          lfs: false
+          fetch-depth: 0 # paths-filter 在 push 事件要比對 before commit
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            ios:
+              - 'core/engine/**'
+              - 'apps/ios/**'
+              # 改了 workflow 本身就讓 ios job 跑一次，否則這個 job 的設定沒人驗
+              - '.github/workflows/ci.yml'
+
+  ios:
+    needs: changes
+    if: needs.changes.outputs.ios == 'true'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          lfs: false
+
+      # iOS 兩個 target 寫在 rust-toolchain.toml，這行會一併裝起來
+      - run: rustup toolchain install
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: ios
+        run: cargo xtask ios
+
+      # xtask ios 會回寫 ffi-lock.toml。這裡有 diff 代表 commit 時忘了帶上它，
+      # 或 macOS 與 Linux 的 bindgen 產物不一致——兩種都必須當場知道。
+      - name: ffi-lock.toml 應保持乾淨
+        run: git diff --exit-code core/engine/ffi-lock.toml

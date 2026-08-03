@@ -32,7 +32,7 @@ v0.1 說 `MockEngine` 是「解鎖三軌並行的唯一機制」。單人配置�
 
 `MockEngine` 約 150 行，成本一天，這三條理由任一條都值回票價。
 
-**uniffi 從 S0 就導入**（v0.1 排在 E4）。理由：uniffi 不阻止你改邊界，它讓改邊界**更便宜**（改 UDL 重新生成 vs 手改兩端 binding）。手寫 C ABI binding 再於 E4 全部丟掉，對單人是不可接受的浪費。
+**uniffi 從 S0 就導入**（v0.1 排在 E4）。理由：uniffi 不阻止你改邊界，它讓改邊界**更便宜**（改 Rust 標註重新生成 vs 手改兩端 binding）。手寫 C ABI binding 再於 E4 全部丟掉，對單人是不可接受的浪費。
 
 ## 38 週是零 buffer 的排法
 

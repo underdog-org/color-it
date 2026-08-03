@@ -124,7 +124,7 @@ color-it/
 │  ├─ history/            Undo/Redo
 │  ├─ oplog/              操作紀錄
 │  ├─ app-state/          工具與 UI 狀態機
-│  └─ engine/             facade ＋ uniffi UDL
+│  └─ engine/             facade ＋ uniffi 標註（proc-macro）
 │
 ├─ contracts/             ★ 跨語言／跨版本／跨工具的獨立規格
 │  ├─ colorpack.schema.json
@@ -616,7 +616,11 @@ One-Euro filter 的參數需實機調校：太強會有「拖尾感」，太弱�
 **FFI 表面**（刻意做小、做粗粒度）：
 
 ```rust
-Engine::new(surface: RawSurfaceHandle, pack: PathBuf, doc: Option<PathBuf>) -> Engine
+// 生命週期
+Engine::new(pack: PathBuf, doc: Option<PathBuf>) -> Result<Engine>
+fn attach_surface(&self, handle: SurfaceHandle) -> Result<()>;
+fn resize_surface(&self, width_px: u32, height_px: u32, scale: f32);
+fn detach_surface(&self);
 
 // 工具
 fn set_tool(&self, tool: Tool);
@@ -638,13 +642,21 @@ fn set_viewport(&self, transform: Transform);
 
 // 狀態
 fn state(&self) -> UiState;
-fn subscribe(&self, listener: Box<dyn StateListener>);
+fn set_state_listener(&self, listener: Option<Arc<dyn StateListener>>);
 
 // 持久化
 fn save(&self) -> Result<()>;
-fn export_png(&self) -> Vec<u8>;
-fn export_timelapse(&self) -> Vec<u8>;
+fn export_png(&self) -> Result<Vec<u8>>;
+fn export_timelapse(&self) -> Result<Vec<u8>>;
 ```
+
+**S0 對這份表面做了三處修正**（理由詳見 `specs/ffi-contract.md §3`）：
+
+1. **`new` 不吃 surface，拆出 `attach_surface` / `detach_surface`。** `MTKView` 的 layer 在 view 生命週期中會重建，re-attach 必須是正常路徑——重建 `Engine` 等於丟掉 undo stack 與未存檔狀態。附帶讓 `new` 能在無 GPU 環境跑，那是 headless 測試的前提。
+2. **`subscribe` → `set_state_listener(Option<…>)`。** 名字誠實反映語意（單一 listener、後設覆蓋前設），`Option` 給了明確的 detach 路徑，否則 Swift 端的 retain cycle 無解。廣播給多個訂閱者是 Bridge 用 Combine 做的事。
+3. **fallible 界線定死**：只有 `new` / `attach_surface` / `save` / `export_*` 回 `Result`，其餘一律 infallible。`render()` 每 frame 呼叫，Swift 端不會想每 frame `try`。這條界線是契約的一部分，不因實作階段而挪動。
+
+**當前實際簽章見 `docs/contracts.md`；不一致時以 `core/engine` 為準。**
 
 **`Tool` 的正式定義**（`set_tool` 的唯一入口型別）：
 
@@ -660,6 +672,8 @@ pub enum Tool {
 - **`Eraser` 帶 `size`**，與 Boundary 5 的 `Op::EraseStroke { preset, size, seed }` 一致。
 
 **`pick_color` 的實作註記**（產品定義見 `prd.md §4.4`，排程在 S1）：單像素 readback，只在抬筆／點擊時觸發，不是高頻路徑，可直接走 §14 R6 那套既有的 async readback ring buffer。**不要為它開任何新的 GPU 資源跨界通道**——Boundary 1 的第 1 條紅線不變，Native 拿到的永遠是一個 `Rgba` 值，不是貼圖或 buffer。
+
+> **未解的張力**：上面的簽章是同步回傳 `Rgba`，但 async readback ring buffer 本質上不同步，兩者不相容。**v0 維持同步簽章**，接受抬筆時約一 frame 的 stall——這是低頻操作。S1 實作時實測；若不可接受，改成非同步是一次 major bump（`docs/contracts.md` C6）。
 
 ### Boundary 2｜`stroke` ↔ `render`
 
@@ -839,9 +853,11 @@ major bump 必須同步更新兩端 Bridge，且需在 `docs/contracts.md` 記�
 cargo xtask verify-generated
 ```
 
-重新生成 binding 後，若 `apps/ios/Generated/` 或 `apps/android/generated/` 出現 diff 則 CI 失敗。
+重新生成 Swift binding，把產物的 SHA-256 與 **`core/engine/ffi-lock.toml`** 比對，不符則 CI 失敗。
 
-這是「一份契約」唯一能被真正強制的機制——沒有這道 gate，兩份實作的漂移只是時間問題。
+**不是比 `Generated/` 的 diff**——§12.2 說那個目錄是 gitignore 的，沒有基準就沒有 diff 可比，照字面實作是一道空的 gate。解法是**指紋進 git、產物不進**：`ffi-lock.toml` 記 uniffi 版本與 bindgen 文字產物（`.swift` / `.h` / `module.modulemap`）的 hash，不含 `.xcframework`（編譯產物不可重現，Linux 上也產不出來）。細節見 `specs/ffi-contract.md §6`。
+
+這是「一份契約」唯一能被真正強制的機制——沒有這道 gate，兩份實作的漂移只是時間問題。順帶讓上面的 semver 規則第一次有執行力：`ffi-lock.toml` 的 diff 就是「FFI 表面變了」的可見信號，逼你在同一個 PR 裡確認 `docs/contracts.md` 有沒有跟上。
 
 ---
 
@@ -1199,6 +1215,8 @@ App Shell 只依賴 `EngineProtocol`。引擎完成後把 `MockEngine` 換成 `R
 
 **這份 protocol 必須與 §6 Boundary 1 的 FFI 表面逐項對應。** 少一個方法，就代表 Shell 到 S1 末期切換 `RustEngine` 時得改動——那正是 `roadmap/S0.md`「Mock → RustEngine 時 Shell 端零修改」這條驗收要擋掉的事。FFI 增刪方法時，同步改這裡。
 
+> **⚠ 上面這段 protocol 尚未跟上 §6 的 S0 修正**（`attach_surface` / `detach_surface` / `resize_surface` 缺席、`state` 的來源改成 `set_state_listener`、`exportPNG` / `exportTimelapse` 現在 fallible）。對齊由 iOS 那份 spec 負責，對照基準是 `docs/contracts.md` ②。`makeCanvasView()` 只存在於 Swift 側，不是 FFI 缺漏（C7）。
+
 ### 10.2 InputAdapter
 
 | | iOS | Android |
@@ -1334,7 +1352,9 @@ cargo xtask verify-generated # ★ CI gate：binding 是否為最新
 
 **uniffi 從 S0 就導入，不等到 Android。**
 
-v0.1 把 uniffi 排在最後，理由是「等真正知道邊界該畫在哪」。這個推理是反的——uniffi 不會阻止你改邊界，它讓改邊界**更便宜**（改 UDL 重新生成 vs 手改兩端 binding）。而手寫 C ABI binding 再全部丟掉，對單人專案是不可接受的浪費。
+v0.1 把 uniffi 排在最後，理由是「等真正知道邊界該畫在哪」。這個推理是反的——uniffi 不會阻止你改邊界，它讓改邊界**更便宜**（改 Rust 標註重新生成 vs 手改兩端 binding）。而手寫 C ABI binding 再全部丟掉，對單人專案是不可接受的浪費。
+
+**撰寫形式是 proc-macro，不是 UDL**（`#[uniffi::export]` ＋ library-mode bindgen）。UDL 與 Rust 實作是兩處要手動保持一致，與 §7「一份契約只能存在一次」直接衝突。理由詳見 `specs/ffi-contract.md §1`。
 
 v1 只生成 Swift；Kotlin 是加一行設定的事。
 
@@ -1405,7 +1425,7 @@ E1 完成時建立第一份基準線，記錄於 `docs/perf-baseline.md`（屆�
 | R2 | **Android 低階機的 Vulkan driver 或 R16Uint 支援問題** | Android 版（若不預先驗證） | ID map 降級為 RG8 打包；或拉高最低支援規格。**即使 v1 不做 Android，也必須在 E1 期間以一天的 spike 驗證**——它保護的是資產格式 |
 | R3 | **繪師 flats 品質不穩**（縫隙、抗鋸齒未關、對齊偏移、色彩空間選錯） | **繪師首次交付（W4–6）開始**，隨圖庫規模放大 | baker 驗證嚴格化並納入 CI；與繪師建立回饋循環。寧可拒收，不可讓問題流到 runtime |
 | R4 | **每週 3–5 張的更新節奏無法維持** | 上線後 2–3 個月 | 這是商業風險而非技術風險，但技術上要確保 baker 全自動、資產上架零手動步驟 |
-| R5 | **FFI 介面在開發期需要修正** | E2 / E3 | 已預期。S0 的介面標記為 v0。因 uniffi 從 S0 導入，修正成本是「改 UDL 重新生成」而非手改 binding |
+| R5 | **FFI 介面在開發期需要修正** | E2 / E3 | 已預期。S0 的介面標記為 v0。因 uniffi 從 S0 導入，修正成本是「改 Rust 標註重新生成」而非手改 binding |
 | R6 | **GPU readback 造成 undo 提交頓挫** | E3 | ring buffer ＋ fence 非同步化；必要時改為 GPU-side texture array 複製，避免 readback 到 CPU。**進度計算共用同一套設施**（§4.7） |
 | R7 | **水彩做不出辨識度** | E2 / D5 | 實作路徑已定案（commit 時對 `T_wet` 做 unsharp，§4.2 (d)），但辨識度未驗證。**三段退路，依序嘗試**：① blur 半徑隨 brush size 縮放 → ② 改兩趟 separable blur 加大擴散 → ③ **砍成四支筆刷**（PRD P2 已授權）。E2 內對此最多投入 3 天，超過即走 ③ |
 | R8 | **oplog 體積超出備份配額** | E3 | 量化 ＋ delta 編碼（§8.2）。若實測仍超標，降級策略是丟棄最舊已分享作品的 oplog，只保留 palette |

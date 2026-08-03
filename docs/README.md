@@ -1,7 +1,7 @@
 # Colorlull — 文件索引
 
 > **這份索引是給 agent 與人類共用的導航表。**
-> 三份主文件都很長（PRD 567 行、Architecture 1368 行），**不要整份載入**——
+> 三份主文件都很長（PRD 567 行、Architecture 1445 行），**不要整份載入**——
 > 用下方的「何時讀 → 讀哪裡」定位到章節，只讀那一節。
 
 ## 文件地圖
@@ -9,11 +9,13 @@
 | 文件 | 回答什麼問題 | 大小 |
 |---|---|---|
 | [prd.md](./prd.md) | **要做什麼、為什麼** — 產品定位、原則、體驗、範圍 | 567 行 |
-| [architecture.md](./architecture.md) | **怎麼做** — 技術選型、分層、渲染、契約、持久化 | 1368 行 |
+| [architecture.md](./architecture.md) | **怎麼做** — 技術選型、分層、渲染、契約、持久化 | 1445 行 |
 | [roadmap/](./roadmap/README.md) | **什麼時候做、做完怎麼算** — 12 個里程碑 ＋ 決策點 | 每份 38–90 行 |
 | [specs/assets-spec.md](./specs/assets-spec.md) | 繪師交付規格（PNG ＋ meta.json 硬性要求） | v1.1 |
 | [specs/build-infra.md](./specs/build-infra.md) | workspace 佈局、依賴 lint 規則、CI 形狀（M0 基建） | 短 |
 | [specs/naming.md](./specs/naming.md) | 產品名稱決策記錄（為何不叫 Color It）＋ 上架前必補的查證項 | 短 |
+| [specs/ffi-contract.md](./specs/ffi-contract.md) | uniffi 型別與方法表、headless mock、`xtask ios`（S0 Rust 契約**設計**） | 509 行 |
+| [contracts.md](./contracts.md) | FFI 的**現況**：表面速查表、語意條款 C1–C8、semver 判定、遷移記錄 | 102 行 |
 
 `roadmap/` 已全部拆檔，一次只讀需要的那一份。
 
@@ -42,7 +44,7 @@
 | 新增檔案放哪個目錄 | `§3` Repo 結構 |
 | 動渲染、blend、tile、dab | `§4` 渲染模型 |
 | 動 core crate 的介面 | `§5` Core crate 設計 |
-| 動 FFI / uniffi / JSON schema | `§7` 契約層 |
+| 動 FFI / uniffi / JSON schema | `§7` 契約層 ＋ `specs/ffi-contract.md` |
 | 動存檔、oplog、Undo、崩潰復原 | `§8` 狀態與持久化 |
 | 動 baker、`.colorpack` 格式 | `§9` 資產管線 ＋ `specs/assets-spec.md` |
 | 動 iOS 整合、手勢、frame pacing | `§10` 平台整合 |
@@ -50,6 +52,9 @@
 | 動 CI / 建置流程 | `§12` 建置與 CI ＋ `specs/build-infra.md` |
 | 動 workspace 骨架、依賴 lint、xtask 指令 | `specs/build-infra.md` |
 | 產品叫什麼、名稱還有哪些沒查 | `specs/naming.md` |
+| 動 FFI 型別／方法簽章、uniffi 生成、`ffi-lock.toml` | `specs/ffi-contract.md` ★ |
+| 某方法現在到底做了什麼、Swift Bridge 能假設什麼 | `contracts.md` ② ③ ★ |
+| FFI 改動算 major 還是 minor、遷移怎麼記 | `contracts.md` ④ ⑤ |
 | 效能目標、量測 | `§13` 效能觀測 |
 | 風險與退路 | `§14` |
 
