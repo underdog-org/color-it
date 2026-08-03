@@ -3,9 +3,11 @@
 iOS 著色 App。核心是「**受區域約束的塗抹**」——不是繪圖軟體。
 單人開發，v1 只有 iOS，38 週零 buffer。
 
-**當前**：S0 契約定義收尾（W4，見 `docs/roadmap/S0.md`）。Rust 側與 iOS 骨架都已落地——`core/engine` 是 headless mock（FFI 表面與語意條款記在 `docs/contracts.md`），`apps/ios/ColorApp.xcodeproj` 有三個 target ＋ 五條路由，`EngineBridgeTests` 八條全綠（含 Mock↔Rust 差分測試）。**剩三條驗收要在模擬器上人工走一遍**（靜態圖畫布、tap→progress、五條路由導航）。
-> 開 Xcode 前先跑 `cargo xtask ios`——`apps/ios/Generated/` 是 gitignore 的產物（`apps/ios/README.md`）。
-**M0 未結的兩件事**：`adventure-time-demo-1/flats.png` 待重做、繪師徵才 JD 待發。
+**當前**：M0／M1／S0 完成，進行中 **E1 手感垂直切片**（★最高風險，8 週時間盒，見 `docs/roadmap/E1.md`）。
+六份 E1 spec 寫了三份（`E1-wgpu` / `E1-composite` / `E1-stroke`，拆分依據在 `docs/specs/E1-spec-plan.md`），**還差 `E1-bucket` / `E1-input` / `E1-perf`**。
+`core/render` 已落地 wgpu 起手：`Gpu`／`RenderContext`／`DocumentResources` 七資源／`MaskBinding`，13 條測試在真 GPU 上跑。
+**下一步**：composite 六層 shader（`E1-composite.md`）——接上就看得到線稿。
+> `attach_surface` 需要真的 `CAMetalLayer`，無自動測試，等接上 iOS 端才驗得到。
 
 > 產品原名 `Color It`，2026-08-03 因商標衝突改名 **Colorlull**（`docs/specs/naming.md`）。
 > 目錄名 `color-it/` 尚未改，`architecture.md §3` 的結構圖照現況寫。
@@ -23,7 +25,7 @@ iOS 著色 App。核心是「**受區域約束的塗抹**」——不是繪圖�
 
 ## 技術選型
 
-Rust + uniffi ／ wgpu + WGSL ／ iOS：SwiftUI + MTKView ／ 資產：`tools/baker` ／ 建置：`cargo xtask`
+Rust + uniffi ／ wgpu + WGSL ／ iOS：SwiftUI + `CAMetalLayer` ＋ 自建 `CADisplayLink`（`MTKView` 是退路）／ 資產：`tools/baker` ／ 建置：`cargo xtask`
 Android（v1 不做，目錄先固定）：Compose + SurfaceView
 
 **已否決，不要重提**：Skia、Flutter/Impeller、Kotlin Multiplatform、libmypaint（`architecture.md §1`）
@@ -52,7 +54,8 @@ v1 不做但已知想做：Android、深色模式、Pencil 進階、iPad 佈局
 ## 慣例
 
 mise 管工具鏈｜建置一律走 `cargo xtask`｜commit `type(scope): subject`｜里程碑推進時更新本檔「當前」｜
-Xcode 的 `xcuserdata/` 不進 git，要進 git 的 scheme 放 `xcshareddata/xcschemes/`
+Xcode 的 `xcuserdata/` 不進 git，要進 git 的 scheme 放 `xcshareddata/xcschemes/`｜
+開 Xcode 前先跑 `cargo xtask ios`——`apps/ios/Generated/` 是 gitignore 的產物（`apps/ios/README.md`）
 
 ## 常查
 
