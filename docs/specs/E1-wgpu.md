@@ -79,7 +79,7 @@ SurfaceTargetUnsafe::CoreAnimationLayer(layer_ptr as *mut c_void)
 
 | 項目 | 值 | 理由 |
 |---|---|---|
-| format | `Bgra8UnormSrgb` | Metal 原生；sRGB 變體讓 composite 在 linear 空間做完後由硬體編碼（見 §6） |
+| format | `Bgra8Unorm` | Metal 原生。**非 sRGB 變體**——composite 直接輸出編碼值（§6） |
 | present mode | `Fifo` | 由 `CADisplayLink` 驅動，vsync 對齊。`E1-input` 擁有 FrameDriver |
 | alpha mode | `Opaque` | `EngineCanvasView.isOpaque = true` 已設 |
 | **`maximumDrawableCount`** | **2（待 D3 實測）** | 預設 3 會多排一格 latency。這是 motion-to-photon 最便宜的一根調節桿，列為 `E1-perf` 的量測項 |
@@ -95,10 +95,10 @@ SurfaceTargetUnsafe::CoreAnimationLayer(layer_ptr as *mut c_void)
 
 | 資源 | wgpu format | usage | 初始內容 |
 |---|---|---|---|
-| `T_line` | `Rgba8UnormSrgb` | `TEXTURE_BINDING \| COPY_DST` | 解碼 `lineart.png` |
-| `T_shade` | `Rgba8UnormSrgb` | `TEXTURE_BINDING \| COPY_DST` | 解碼 `shade.png`，或 1×1 白 dummy |
+| `T_line` | `Rgba8Unorm` | `TEXTURE_BINDING \| COPY_DST` | 解碼 `lineart.png` |
+| `T_shade` | `Rgba8Unorm` | `TEXTURE_BINDING \| COPY_DST` | 解碼 `shade.png`，或 1×1 白 dummy |
 | `T_region` | **`R16Uint`** | `TEXTURE_BINDING \| COPY_DST` | 解 RLE 的 `Vec<u16>`（§5） |
-| `T_paint` | `Rgba8UnormSrgb` | `TEXTURE_BINDING \| RENDER_ATTACHMENT \| COPY_SRC` | 全 0（透明） |
+| `T_paint` | `Rgba8Unorm` | `TEXTURE_BINDING \| RENDER_ATTACHMENT \| COPY_SRC` | 全 0（透明） |
 | `T_erase` | `R8Unorm` | `TEXTURE_BINDING \| RENDER_ATTACHMENT \| COPY_SRC` | 全 0（未擦除） |
 | `T_wet` | `R8Unorm` | `TEXTURE_BINDING \| RENDER_ATTACHMENT` | 全 0 |
 | `Buf_palette` | `Buffer<vec4<f32>>` | `STORAGE \| COPY_DST` | 全 0（alpha = 0 表未填色） |
@@ -107,7 +107,7 @@ SurfaceTargetUnsafe::CoreAnimationLayer(layer_ptr as *mut c_void)
 usage flag 不影響記憶體，事後追加卻要改資源建立的所有路徑。`T_wet` 不加——
 它是單筆暫存，永遠不進 undo（`§4.3` #4）。
 
-**`T_shade` 缺席時綁 1×1 全白 `Rgba8UnormSrgb`，不做 shader variant**
+**`T_shade` 缺席時綁 1×1 全白 `Rgba8Unorm`，不做 shader variant**
 （`architecture.md §4.1`）。它在 composite 是 Multiply，白色即單位元。
 
 ### 4.1 `Buf_palette` 的「未填色」表示
@@ -164,17 +164,14 @@ usage flag 不影響記憶體，事後追加卻要改資源建立的所有路徑
 
 ## 6. 色彩空間
 
-**全部在 linear 空間合成，由 sRGB 格式在讀寫兩端自動轉換。**
+**全部在 sRGB 編碼值上直接合成，硬體不做任何 decode／encode。**
+因此所有顏色資源用非 sRGB 變體的 `Unorm`，surface 用 `Bgra8Unorm`。
 
-| 資源 | shader 看到 |
-|---|---|
-| `T_line` `T_shade` `T_paint` surface | linear f32（sRGB 格式，硬體解／編碼） |
-| `T_erase` `T_wet` | linear——它們是 coverage 不是顏色 |
-| `Buf_palette` | linear `vec4<f32>`。FFI 的 `Rgba{u8}` → linear 的轉換在 `document` 做 |
+決定性理由是 baker 的 `thumb.jpg` 就是在編碼值上用 u8 整數乘法合成的
+（`tools/baker/src/thumb.rs`），而 Gallery 顯示那張縮圖——**畫布必須跟它長一樣**。
+`Buf_palette` 存的也是編碼值（`Rgba.r as f32 / 255`，不 linearize）。
 
-`T_paint` 用 `Rgba8UnormSrgb` 而非 `Rgba8Unorm`：它是 render attachment，硬體在
-linear 空間 blend 再編碼回 sRGB，8 bit 的精度分佈才符合感知；存 linear 的 `Unorm`
-會在暗部有可見階梯。**完整論證與 WGSL 歸 `E1-composite.md`**，本文只保證格式一致。
+**完整論證、代價與退路見 `E1-composite.md §2`**，本文只保證格式與那份一致。
 
 ---
 
@@ -240,7 +237,7 @@ wgpu 在 macOS 上不需要 surface 就能建 device，所以 `render` 可以有
 | `detach_surface` 釋放 `DocumentResources` 省記憶體 | 違反 C5，切出 App 再回來畫作消失 |
 | `T_region` 只留 GPU、`tap` 走 readback | 油漆桶是主互動，不能吃一 frame stall（§5.1） |
 | `T_shade` 缺席時另做一份 shader variant | `architecture.md §4.1` 已否決：多一個 pipeline 變體換不到效能 |
-| `T_paint` 用 `Rgba8Unorm` 存 linear | 8 bit 存 linear 在暗部有可見階梯（§6） |
+| 在 linear 空間合成 | 與 baker 的 `thumb.jpg` 不一致，Gallery 與 Canvas 會是兩個顏色（`E1-composite.md §2`） |
 | 為「未填色」另開一張 bitmap | `Buf_palette` 的 alpha 通道本來就閒著（§4.1） |
 | 把 `maximumDrawableCount` 交給 wgpu | wgpu 不暴露它。這是 layer 的顯示屬性，歸 Native（§3.1） |
 
