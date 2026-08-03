@@ -93,8 +93,9 @@ let base    = mix(f.prev_color, palette[id], t);
 var color   = mix(PAPER_WHITE, base.rgb, base.a);
 color       = mix(color, PAPER_WHITE, erased);
 
-// ③ 已提交的筆刷
-color       = over(color, textureLoad(T_paint, cc, 0));
+// ③ 已提交的筆刷（T_paint 是 premultiplied，見 E1-stroke §8）
+let p       = textureLoad(T_paint, cc, 0);
+color       = p.rgb + color * (1.0 - p.a);
 
 // ④ 進行中的筆畫
 color       = over(color, tint(textureLoad(T_wet, cc, 0).r, brush_color) * mask(id));
