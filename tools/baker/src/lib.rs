@@ -6,6 +6,7 @@
 //!
 //! 規格見 `docs/specs/baker-core-design.md`；上位描述見 `docs/architecture.md §9`。
 
+pub mod binarize;
 pub mod check;
 pub mod compose;
 pub mod dilate;
