@@ -1,7 +1,11 @@
 //! 色標圖解析（`specs/baker-seeds.md §2.2`）。
+//!
+//! 色點的顏色一色兩用：既是區域識別，也是建議色（§2.3）。`reference.png` 因此消失。
 
 use std::cmp::Reverse;
 use std::collections::HashMap;
+
+use colorpack::region::hex_color;
 
 /// 色標的 `alpha == 255` 面積下限（母帶）。低於此值取不出可靠的眾數色。
 pub const MIN_SEED_AREA: u32 = 64;
@@ -99,6 +103,22 @@ fn describe(blob: &[usize], rgba: &[u8], w: usize) -> Seed {
     }
 }
 
+/// `manifest.palette[]`：**去重後**的建議色票，依總面積遞減排序，平手取較小 region id。
+/// 不設上限，UI 自行取前 N 個（`baker-core-design §3.5`）。面積用**輸出**解析度，
+/// 與 `regions.json` 同一個空間。
+pub fn palette(colors: &[[u8; 3]], output_areas: &[u32]) -> Vec<String> {
+    let mut acc: Vec<([u8; 3], u64, u32)> = Vec::new();
+    for (id, color) in colors.iter().enumerate() {
+        let area = output_areas.get(id).copied().unwrap_or(0) as u64;
+        match acc.iter_mut().find(|(c, _, _)| c == color) {
+            Some(entry) => entry.1 += area,
+            None => acc.push((*color, area, id as u32)),
+        }
+    }
+    acc.sort_by(|a, b| b.1.cmp(&a.1).then(a.2.cmp(&b.2)));
+    acc.into_iter().map(|(c, _, _)| hex_color(c)).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -164,5 +184,25 @@ mod tests {
     #[test]
     fn a_blank_image_yields_no_seeds() {
         assert!(read(&img(&[T, T, T, T]), 2, 2).is_empty());
+    }
+
+    const RGB_R: [u8; 3] = [255, 0, 0];
+    const RGB_G: [u8; 3] = [0, 255, 0];
+
+    #[test]
+    fn palette_is_deduped_and_sorted_by_total_area() {
+        // R 合計 3 + 1 = 4，G 是 10 → G 在前
+        assert_eq!(
+            palette(&[RGB_R, RGB_G, RGB_R], &[3, 10, 1]),
+            vec!["#00FF00".to_owned(), "#FF0000".to_owned()]
+        );
+    }
+
+    #[test]
+    fn palette_ties_go_to_the_smaller_region_id() {
+        assert_eq!(
+            palette(&[RGB_G, RGB_R], &[5, 5]),
+            vec!["#00FF00".to_owned(), "#FF0000".to_owned()]
+        );
     }
 }

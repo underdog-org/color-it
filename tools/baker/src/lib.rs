@@ -11,7 +11,6 @@ pub mod check;
 pub mod compose;
 pub mod dilate;
 pub mod image;
-pub mod reference;
 pub mod report;
 pub mod resample;
 pub mod seeds;
@@ -56,7 +55,7 @@ pub fn bake(dir: &Path, opts: &BakeOptions) -> Result<Report> {
         id: src.folder_id.clone(),
         source: dir.display().to_string(),
         diagnostics: Vec::new(),
-        unique_colors: None,
+        seeds: None,
         summary: None,
     };
 
@@ -68,15 +67,13 @@ pub fn bake(dir: &Path, opts: &BakeOptions) -> Result<Report> {
         return finish(report, opts);
     }
 
-    let flats = Image::load(&src.flats)?;
     let lineart = Image::load(&src.lineart)?;
-    let reference_img = Image::load(&src.reference)?;
+    let seeds_img = Image::load(&src.seeds)?;
     let shade = src.shade.as_ref().map(|p| Image::load(p)).transpose()?;
 
     let mut named: Vec<(&str, &Image)> = vec![
-        (source::FLATS, &flats),
         (source::LINEART, &lineart),
-        (source::REFERENCE, &reference_img),
+        (source::SEEDS, &seeds_img),
     ];
     if let Some(shade) = &shade {
         named.push((source::SHADE, shade));
@@ -93,15 +90,32 @@ pub fn bake(dir: &Path, opts: &BakeOptions) -> Result<Report> {
         return finish(report, opts);
     }
 
-    let (master_w, master_h) = (flats.width, flats.height);
+    let (master_w, master_h) = (lineart.width, lineart.height);
 
-    // ── 母帶階段 ────────────────────────────────────────────────────
-    let (flats_diags, unique_colors) = check::master::flats(&flats);
-    let unique_color_overflow = flats_diags
-        .iter()
-        .any(|d| d.code == code::UNIQUE_COLOR_OVERFLOW);
-    report.unique_colors = Some(unique_colors);
-    diagnostics.extend(flats_diags);
+    // ── 母帶階段（§3 管線）──────────────────────────────────────────
+    let line = binarize::line_mask(&lineart.rgba, binarize::DEFAULT_LINE_THRESHOLD);
+    let line_ratio = binarize::line_ratio(&line);
+    diagnostics.extend(check::master::line_coverage(line_ratio));
+
+    let seed_list = seeds::read(&seeds_img.rgba, master_w, master_h);
+    report.seeds = Some(report::SeedStats {
+        seeds: seed_list.len(),
+        line_ratio,
+    });
+    drop(seeds_img);
+
+    let mut grown = segment::grow(&seed_list, &line, master_w, master_h);
+    // grow 之後才知道每區多大，merge 要靠它挑「面積最大的相鄰區」。
+    let grown_areas = region_areas(&grown.labels, seed_list.len());
+    let orphans = segment::merge_small_orphans(
+        &mut grown.labels,
+        &line,
+        master_w,
+        master_h,
+        &grown_areas,
+        segment::MIN_ORPHAN_AREA,
+    );
+    diagnostics.extend(check::master::seeds(&seed_list, &grown, &orphans));
 
     let lineart_white = compose::over_white(&lineart.rgba);
     let shade_white = shade.as_ref().map(|s| compose::over_white(&s.rgba));
@@ -109,18 +123,6 @@ pub fn bake(dir: &Path, opts: &BakeOptions) -> Result<Report> {
         diagnostics.extend(check::master::shade(shade_white, master_w));
     }
     drop(shade);
-
-    if unique_color_overflow {
-        report.diagnostics = diagnostics;
-        return finish(report, opts);
-    }
-
-    let regions = segment::label_regions(&flats.rgba, master_w, master_h);
-    drop(flats);
-
-    let (suggested, ref_diag) = reference::read(&reference_img.rgba, &regions);
-    diagnostics.extend(ref_diag);
-    drop(reference_img);
 
     // 階段間 fail-fast：母帶有 Error 就不進降採樣。canvas-size 也在這裡被擋下，
     // 所以底下的 aspect 一定推得出來。
@@ -133,15 +135,30 @@ pub fn bake(dir: &Path, opts: &BakeOptions) -> Result<Report> {
     }
     let aspect = aspect.expect("canvas-size 通過就一定推得出 aspect");
 
+    // 測地擴張把 id 填進線像素，直到全覆蓋（§3.1 ②）。母帶通過才做——
+    // 有錯的話 labels 還有洞，`from_labels` 會 panic。
+    let (_, left) = segment::close(&mut grown.labels, master_w, master_h);
+    debug_assert_eq!(left, 0, "母帶無錯就不該有碰不到任何 seed 的孤島");
+
+    let suggested: Vec<[u8; 3]> = seed_list.iter().map(|s| s.color).collect();
+    let regions = segment::RegionMap::from_labels(
+        std::mem::take(&mut grown.labels),
+        master_w,
+        master_h,
+        seed_list.len() as u32,
+    );
+
     // ── 縮圖（母帶解析度，§3.7）────────────────────────────────────
     let thumb_jpg = thumb::render(
         master_w,
         master_h,
         &regions.labels,
-        &suggested.colors,
+        &suggested,
         &lineart_white,
         shade_white.as_deref(),
     )?;
+
+    drop(line);
 
     // ── 降採樣 ──────────────────────────────────────────────────────
     let (out_w, out_h) = (master_w / 2, master_h / 2);
@@ -178,7 +195,7 @@ pub fn bake(dir: &Path, opts: &BakeOptions) -> Result<Report> {
             centroid: stats.centroid[id as usize],
             area: stats.area[id as usize],
             bbox: stats.bbox[id as usize],
-            suggested_color: hex_color(suggested.colors[id as usize]),
+            suggested_color: hex_color(suggested[id as usize]),
         })
         .collect();
 
@@ -193,7 +210,7 @@ pub fn bake(dir: &Path, opts: &BakeOptions) -> Result<Report> {
             difficulty: Difficulty::from_region_count(region_count),
             category: src.category().expect("category 已驗過"),
             has_shade: shade_out.is_some(),
-            palette: reference::palette(&suggested.colors, &stats.area),
+            palette: seeds::palette(&suggested, &stats.area),
         },
         regions: entries,
         region_ids: ids.iter().map(|&id| id as u16).collect(),
@@ -226,6 +243,17 @@ pub fn bake(dir: &Path, opts: &BakeOptions) -> Result<Report> {
     finish(report, opts)
 }
 
+/// `grow` 之後的逐 seed 面積。未認領像素（`UNASSIGNED`）不計。
+fn region_areas(labels: &[u32], count: usize) -> Vec<u32> {
+    let mut areas = vec![0u32; count];
+    for &id in labels {
+        if id != segment::UNASSIGNED {
+            areas[id as usize] += 1;
+        }
+    }
+    areas
+}
+
 fn finish(report: Report, opts: &BakeOptions) -> Result<Report> {
     if let Some(path) = &opts.report_json {
         if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
@@ -241,36 +269,37 @@ fn finish(report: Report, opts: &BakeOptions) -> Result<Report> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::segment::RESERVED_COLOR;
-    use crate::synth::{Asset, PALETTE, PERM};
+    use crate::synth::Asset;
 
     const W: u32 = 64;
     const H: u32 = 64;
 
-    /// 一張同時踩到四條**互相獨立**檢查的素材
+    /// 一張同時踩到四條**互相獨立**檢查的素材：
+    /// `canvas-size`（64×64 不是 4096 級）、`seed-collision`（左半兩個色標之間沒有線）、
+    /// `orphan-area`（右半整塊沒有色標）、`seed-too-small`（其中一個色標只有 4px）。
     fn four_independent_problems() -> Asset {
-        let mut flats = Vec::with_capacity((W * H * 4) as usize);
-        let mut reference = Vec::with_capacity((W * H * 4) as usize);
-        for _y in 0..H {
-            for x in 0..W {
-                let region = if x < W / 2 { 1usize } else { 2usize };
-                let c = if region == 2 {
-                    RESERVED_COLOR
-                } else {
-                    PALETTE[1]
-                };
-                flats.extend_from_slice(&[c[0], c[1], c[2], 255]);
-                let r = PALETTE[PERM[region] as usize];
-                reference.extend_from_slice(&[r[0], r[1], r[2], 255]);
-            }
-        }
         let at = |x: u32, y: u32| ((y * W + x) * 4) as usize;
-        flats[at(3, 3) + 3] = 0;
-        for y in 8..12 {
-            for x in 8..12 {
-                reference[at(x, y)..at(x, y) + 3].copy_from_slice(&[1, 2, 3]);
+
+        // 線稿：只有一條垂直線把畫布切成左右兩半。左半內部**故意沒有分界**。
+        let mut lineart = vec![0u8; (W * H * 4) as usize];
+        for y in 0..H {
+            lineart[at(W / 2, y) + 3] = 255;
+        }
+
+        // 左半兩個色標 → 同一個封閉區 → collision。其中第二個只有 2×2 → too-small。
+        // 右半一個色標都沒有 → orphan-area（面積 32×64 = 2048 ≥ MIN_ORPHAN_AREA）。
+        let mut seeds = vec![0u8; (W * H * 4) as usize];
+        for y in 8..20u32 {
+            for x in 4..16u32 {
+                seeds[at(x, y)..at(x, y) + 4].copy_from_slice(&[220, 30, 30, 255]);
             }
         }
+        for y in 40..42u32 {
+            for x in 4..6u32 {
+                seeds[at(x, y)..at(x, y) + 4].copy_from_slice(&[30, 30, 220, 255]);
+            }
+        }
+
         Asset {
             id: "fixture-four-problems".to_owned(),
             title: "Four problems".to_owned(),
@@ -278,20 +307,19 @@ mod tests {
             notes: "階段內不 fail-fast 的回歸測試素材。".to_owned(),
             width: W,
             height: H,
-            flats,
-            lineart: vec![0u8; (W * H * 4) as usize],
-            reference,
+            lineart,
+            seeds,
             shade: None,
-            flats_icc: None,
+            seeds_icc: None,
             compression: png::Compression::Fast,
         }
     }
 
-    /// §4.2「階段內不 fail-fast」：繪師一次拿到所有問題，來回從 N 天變 1 天。
+    /// §4.4「階段內不 fail-fast」：繪師一次拿到所有問題，來回從 N 天變 1 天。
     ///
-    /// 迴歸的是兩個曾經過寬的提早退出——`canvas-size` 被綁進 `size-mismatch` 的
-    /// structural failure、`reserved-color` 被綁進 flats 的 broken 判定。前者會讓
-    /// 逐像素檢查整批不跑，後者會讓 `ref-mismatch` 永遠看不到。
+    /// 迴歸的是提早退出又變寬——`canvas-size` 被綁進 `size-mismatch` 的 structural
+    /// failure 會讓整批母帶檢查不跑；四條色標診斷之間任何一條先 return 都會讓
+    /// 繪師補一條線交一次、補一個點又交一次。
     #[test]
     fn an_early_failure_does_not_hide_the_independent_checks() {
         let tmp = tempfile::tempdir().expect("建立 tempdir 失敗");
@@ -303,9 +331,9 @@ mod tests {
 
         for expected in [
             code::CANVAS_SIZE,
-            code::UNASSIGNED_PIXEL,
-            code::RESERVED_COLOR,
-            code::REF_MISMATCH,
+            code::SEED_COLLISION,
+            code::ORPHAN_AREA,
+            code::SEED_TOO_SMALL,
         ] {
             assert!(
                 report.find(expected).is_some(),
@@ -315,9 +343,9 @@ mod tests {
         }
     }
 
-    /// §2.6「報告中一律列出實際唯一色數」——被拒收時也要有。
+    /// 色標統計一律列出——被拒收時也要有。
     #[test]
-    fn unique_colors_survive_a_rejection() {
+    fn seed_stats_survive_a_rejection() {
         let tmp = tempfile::tempdir().expect("建立 tempdir 失敗");
         let dir = four_independent_problems()
             .write(tmp.path())
@@ -327,12 +355,8 @@ mod tests {
 
         assert!(report.has_error());
         assert!(report.summary.is_none(), "沒打包出來就不該有 summary");
-        let unique = report.unique_colors.expect("拒收也要列出唯一色數");
-        assert_eq!((unique.count, unique.exact), (2, true));
-        assert!(
-            report.to_text().contains("唯一色 2"),
-            "{}",
-            report.to_text()
-        );
+        let stats = report.seeds.expect("拒收也要列出色標統計");
+        assert_eq!(stats.seeds, 2);
+        assert!(report.to_text().contains("色標 2 個"), "{}", report.to_text());
     }
 }

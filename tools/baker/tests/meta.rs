@@ -19,13 +19,21 @@ fn every_source_directory_has_a_valid_meta_json() {
             continue;
         }
         // Source::load 不解碼 PNG，所以 LFS pointer 也跑得過——這裡驗的只有 meta.json。
+        //
+        // **刻意不看 `source-incomplete`**：那條驗的是繳交清單，而 `baker-seeds.md §2`
+        // 把清單從 flats+reference 換成 seeds 之後，舊契約交付的手繪素材必然缺件。
+        // 素材重交是 M0 的事，不該讓它把 meta.json 的迴歸網一起弄成紅的。
         let (_, diagnostics) = baker::source::Source::load(&dir)
             .unwrap_or_else(|e| panic!("{} 的 meta.json 讀不起來：{e:#}", dir.display()));
+        let meta_problems: Vec<&String> = diagnostics
+            .iter()
+            .filter(|d| d.code != baker::report::code::SOURCE_INCOMPLETE)
+            .map(|d| &d.message)
+            .collect();
         assert!(
-            diagnostics.is_empty(),
-            "{} 的 meta.json 不合規：{:?}",
+            meta_problems.is_empty(),
+            "{} 的 meta.json 不合規：{meta_problems:?}",
             dir.display(),
-            diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
         );
         checked += 1;
     }

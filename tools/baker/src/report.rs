@@ -7,17 +7,22 @@ use std::fmt::Write as _;
 use serde::Serialize;
 
 /// `code` 是固定字彙表——測試斷言的是特定 `code`，繪師收到的退件也照它分類。
-/// 新增檢查必須同時進 `baker-core-design.md §4.1` 的那張表。
+/// 新增檢查必須同時進 `baker-seeds.md §4.1` 的那張表。
 pub mod code {
     pub const SOURCE_INCOMPLETE: &str = "source-incomplete";
     pub const SIZE_MISMATCH: &str = "size-mismatch";
     pub const CANVAS_SIZE: &str = "canvas-size";
     pub const COLOR_SPACE: &str = "color-space";
-    pub const UNIQUE_COLOR_OVERFLOW: &str = "unique-color-overflow";
-    pub const TINY_COLOR_AREA: &str = "tiny-color-area";
-    pub const RESERVED_COLOR: &str = "reserved-color";
-    pub const UNASSIGNED_PIXEL: &str = "unassigned-pixel";
-    pub const REF_MISMATCH: &str = "ref-mismatch";
+    /// 兩個以上色標落進同一封閉區 → 線稿有缺口。
+    pub const SEED_COLLISION: &str = "seed-collision";
+    /// ≥`MIN_ORPHAN_AREA` 的自由區沒有色標 → 漏點了。
+    pub const ORPHAN_AREA: &str = "orphan-area";
+    /// 色標的 `alpha == 255` 面積不足，取不出可靠眾數色。
+    pub const SEED_TOO_SMALL: &str = "seed-too-small";
+    /// 色標重心落在線像素上，flood fill 起不來。
+    pub const SEED_ON_LINE: &str = "seed-on-line";
+    /// 線像素佔比過高——二值化門檻不對，或線稿是白底交付的。
+    pub const LINE_COVERAGE: &str = "line-coverage";
     pub const SHADE_TOO_DARK: &str = "shade-too-dark";
     pub const META_ID_MISMATCH: &str = "meta-id-mismatch";
     pub const META_BAD_CATEGORY: &str = "meta-bad-category";
@@ -137,15 +142,16 @@ impl Coords {
     }
 }
 
-/// `flats` 的唯一色數（§2.6）。
+/// 色標統計。取代 `flats` 時代的唯一色數（那條隨 `flats.png` 一起消失）。
 ///
-/// 掛在 `Report` 而不是 `Summary`：規格要求**一律列出**，而拒收時最需要它——
-/// 「之後要調 `MAX_UNIQUE_COLORS` 才有依據」講的正是被退件的那些素材。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-pub struct UniqueColors {
-    pub count: usize,
-    /// 快篩命中時掃描提前中止，`count` 是下界而非實際值。
-    pub exact: bool,
+/// 掛在 `Report` 而不是 `Summary`：拒收時最需要它——「繪師到底點了幾個點」
+/// 是判斷 `orphan-area` 是漏點還是整層交錯的第一個依據。
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+pub struct SeedStats {
+    /// `seeds.png` 裡讀到的色標數。
+    pub seeds: usize,
+    /// 線像素佔全畫布的比例。
+    pub line_ratio: f32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -166,8 +172,8 @@ pub struct Report {
     pub id: String,
     pub source: String,
     pub diagnostics: Vec<Diagnostic>,
-    /// 一讀到 `flats` 就有，與是否通過無關。
-    pub unique_colors: Option<UniqueColors>,
+    /// 一讀到 `seeds` 就有，與是否通過無關。
+    pub seeds: Option<SeedStats>,
     /// 只有真的打包出來才有。
     pub summary: Option<Summary>,
 }
@@ -229,10 +235,13 @@ impl Report {
                 let _ = writeln!(out, "      {note} {}{suffix}", list.join(" "));
             }
         }
-        if let Some(u) = &self.unique_colors {
-            let prefix = if u.exact { "" } else { "≥" };
-            let note = if u.exact { "" } else { "（快篩中止）" };
-            let _ = writeln!(out, "  flats 唯一色 {prefix}{}{note}", u.count);
+        if let Some(s) = &self.seeds {
+            let _ = writeln!(
+                out,
+                "  色標 {} 個／線像素 {:.2}%",
+                s.seeds,
+                s.line_ratio * 100.0
+            );
         }
         if let Some(s) = &self.summary {
             let _ = writeln!(
@@ -272,52 +281,35 @@ mod tests {
         for i in 0..100 {
             coords.push(i, i);
         }
-        let d = Diagnostic::error(code::UNASSIGNED_PIXEL, Stage::Master, "x").with_coords(coords);
+        let d = Diagnostic::error(code::ORPHAN_AREA, Stage::Master, "x").with_coords(coords);
         assert_eq!(d.coords.len(), MAX_COORDS);
         assert_eq!(d.coord_total, 100);
         let report = Report {
             id: "x".into(),
             source: "x".into(),
             diagnostics: vec![d],
-            unique_colors: None,
+            seeds: None,
             summary: None,
         };
         assert!(report.to_text().contains("另有 84 處"));
     }
 
-    /// §2.6「報告中一律列出實際唯一色數」——含被拒收的素材。
+    /// 色標統計一律列出——含被拒收的素材。「點了幾個點」是判讀 `orphan-area`
+    /// 的第一個依據，正好是被退件時最需要的資訊。
     #[test]
-    fn unique_colors_are_printed_even_when_the_asset_is_rejected() {
+    fn seed_stats_are_printed_even_when_the_asset_is_rejected() {
         let report = Report {
             id: "x".into(),
             source: "x".into(),
-            diagnostics: vec![Diagnostic::error(code::TINY_COLOR_AREA, Stage::Master, "x")],
-            unique_colors: Some(UniqueColors {
-                count: 171,
-                exact: true,
+            diagnostics: vec![Diagnostic::error(code::ORPHAN_AREA, Stage::Master, "x")],
+            seeds: Some(SeedStats {
+                seeds: 7,
+                line_ratio: 0.0498,
             }),
             summary: None,
         };
         let text = report.to_text();
-        assert!(text.contains("唯一色 171"), "{text}");
-        assert!(!text.contains("≥"), "{text}");
-    }
-
-    /// 快篩中止時 `count` 是下界，文字必須說清楚，不能假裝是實際值。
-    #[test]
-    fn a_screened_out_count_is_rendered_as_a_lower_bound() {
-        let report = Report {
-            id: "x".into(),
-            source: "x".into(),
-            diagnostics: Vec::new(),
-            unique_colors: Some(UniqueColors {
-                count: 1025,
-                exact: false,
-            }),
-            summary: None,
-        };
-        let text = report.to_text();
-        assert!(text.contains("唯一色 ≥1025"), "{text}");
-        assert!(text.contains("快篩中止"), "{text}");
+        assert!(text.contains("色標 7 個"), "{text}");
+        assert!(text.contains("4.98%"), "{text}");
     }
 }

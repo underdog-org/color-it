@@ -2,15 +2,17 @@
 
 use colorpack::Aspect;
 
+use crate::binarize::MAX_LINE_RATIO;
 use crate::compose::luma;
 use crate::image::Image;
-use crate::report::{Coords, Diagnostic, Stage, UniqueColors, code};
-use crate::segment::{self, MIN_COLOR_AREA, RESERVED_COLOR};
+use crate::report::{Coords, Diagnostic, Stage, code};
+use crate::seeds::{MIN_SEED_AREA, Seed};
+use crate::segment::{Grown, MIN_ORPHAN_AREA, Orphan};
 
 /// 母帶長邊。
 pub const MASTER_LONG_EDGE: u32 = 4096;
 
-/// 四張圖尺寸與對齊一致、長邊 4096、比例 1:1 或 3:4。
+/// 三張圖尺寸與對齊一致、長邊 4096、比例 1:1 或 3:4。
 pub fn geometry(images: &[(&str, &Image)]) -> (Vec<Diagnostic>, Option<Aspect>) {
     let mut out = Vec::new();
     let (_, first) = images[0];
@@ -26,7 +28,7 @@ pub fn geometry(images: &[(&str, &Image)]) -> (Vec<Diagnostic>, Option<Aspect>) 
             code::SIZE_MISMATCH,
             Stage::Master,
             format!(
-                "四張圖尺寸不一致：{} {w}×{h}，但 {}。\
+                "圖層尺寸不一致：{} {w}×{h}，但 {}。\
                  必須從同一個 .clip 的不同圖層導出",
                 images[0].0,
                 odd.join("、")
@@ -62,111 +64,116 @@ pub fn color_space(images: &[(&str, &Image)]) -> Vec<Diagnostic> {
         .collect()
 }
 
-/// `flats` 的四條：未指派像素、抗鋸齒快篩、抗鋸齒實判、保留色。
-pub fn flats(flats: &Image) -> (Vec<Diagnostic>, UniqueColors) {
-    let mut out = Vec::new();
-    let width = flats.width;
-
-    // §2.3「未指派像素」的唯一定義：flats 的 alpha < 255。
-    let mut gaps = Coords::master();
-    for (i, px) in flats.rgba.chunks_exact(4).enumerate() {
-        if px[3] != 255 {
-            let i = i as u32;
-            gaps.push(i % width, i / width);
-        }
+/// 線像素佔比過高的警告（§4.1）。獨立成一條：它必須在 `grow` 之前就報出來，
+/// 因為門檻不對時後面每一條診斷都會是雜訊。
+pub fn line_coverage(ratio: f32) -> Vec<Diagnostic> {
+    if ratio <= MAX_LINE_RATIO {
+        return Vec::new();
     }
-    if !gaps.is_empty() {
+    vec![Diagnostic::warning(
+        code::LINE_COVERAGE,
+        Stage::Master,
+        format!(
+            "線像素佔畫布 {:.1}%，超過 {:.0}%。\
+             lineart 應該是透明底、只有線本身不透明——白底交付會讓整張都判成線",
+            ratio * 100.0,
+            MAX_LINE_RATIO * 100.0
+        ),
+    )]
+}
+
+/// 色標的四條（§4.1）：太小、落在線上、撞進同一封閉區、漏點。
+///
+/// **一次全報**（§4.4）：繪師補一條線交一次、補一個點又交一次是不能接受的，
+/// 所以這裡沒有任何提早退出。
+pub fn seeds(seeds: &[Seed], grown: &Grown, orphans: &[Orphan]) -> Vec<Diagnostic> {
+    let mut out = Vec::new();
+    let anchor = |id: u32| seeds[id as usize].anchor;
+
+    let mut small = Coords::master();
+    let mut smallest = u32::MAX;
+    for s in seeds.iter().filter(|s| s.solid_area < MIN_SEED_AREA) {
+        smallest = smallest.min(s.solid_area);
+        small.push(s.anchor.0, s.anchor.1);
+    }
+    if !small.is_empty() {
         out.push(
             Diagnostic::error(
-                code::UNASSIGNED_PIXEL,
+                code::SEED_TOO_SMALL,
                 Stage::Master,
                 format!(
-                    "{} 個像素的 alpha < 255。flats 必須整張不透明、每個像素都有顏色\
-                     （含線稿底下）。做 assets-spec §6.1 的洋紅檢查",
-                    gaps.total()
+                    "{} 個色標的不透明面積不足 {MIN_SEED_AREA}px（最小的只有 {smallest}px），\
+                     取不出可靠的建議色。把點畫大一點，直徑約 16px 以上",
+                    small.total()
                 ),
             )
-            .with_coords(gaps),
+            .with_coords(small),
         );
     }
 
-    let unique_colors = match segment::color_histogram(&flats.rgba, width) {
-        // 快篩命中：圖徹底壞掉（例如色彩空間被轉換過），在算面積直方圖之前就停。
-        Err(seen) => {
-            out.push(Diagnostic::error(
-                code::UNIQUE_COLOR_OVERFLOW,
+    if !grown.on_line.is_empty() {
+        let mut coords = Coords::master();
+        for &id in &grown.on_line {
+            let (x, y) = anchor(id);
+            coords.push(x, y);
+        }
+        out.push(
+            Diagnostic::error(
+                code::SEED_ON_LINE,
                 Stage::Master,
                 format!(
-                    "flats 的唯一色數超過 {}（掃到第 {seen} 個就停）。\
-                     這通常代表 flats 被色彩管理轉換過，或抗鋸齒完全沒關",
-                    segment::MAX_UNIQUE_COLORS
+                    "{} 個色標壓在線上，填不出區域。把點移進封閉區裡面",
+                    coords.total()
                 ),
-            ));
-            // 掃到就停，所以這是下界不是實際值。
-            UniqueColors {
-                count: seen,
-                exact: false,
+            )
+            .with_coords(coords),
+        );
+    }
+
+    if !grown.collisions.is_empty() {
+        let mut coords = Coords::master();
+        for &(first, second) in &grown.collisions {
+            for (x, y) in [anchor(first), anchor(second)] {
+                coords.push(x, y);
             }
         }
-        Ok(hist) => {
-            // 實判：這才是 assets-spec §4.2 / §7 對繪師承諾的那條。
-            let mut tiny: Vec<(&[u8; 3], u32, (u32, u32))> = hist
-                .iter()
-                .filter(|(_, s)| s.area < MIN_COLOR_AREA)
-                .map(|(c, s)| (c, s.area, s.first))
-                .collect();
-            tiny.sort_by_key(|(c, _, _)| **c);
-            if !tiny.is_empty() {
-                let mut coords = Coords::master();
-                for (_, _, (x, y)) in &tiny {
-                    coords.push(*x, *y);
-                }
-                let sample: Vec<String> = tiny
-                    .iter()
-                    .take(4)
-                    .map(|(c, area, _)| {
-                        format!("#{:02X}{:02X}{:02X}（{area}px）", c[0], c[1], c[2])
-                    })
-                    .collect();
-                out.push(
-                    Diagnostic::error(
-                        code::TINY_COLOR_AREA,
-                        Stage::Master,
-                        format!(
-                            "{} 個顏色的總面積 < {MIN_COLOR_AREA}px（母帶），例如 {}。\
-                             這是抗鋸齒沒關的判準——關掉抗鋸齒重新填色",
-                            tiny.len(),
-                            sample.join("、")
-                        ),
-                    )
-                    .with_coords(coords),
-                );
-            }
+        out.push(
+            Diagnostic::error(
+                code::SEED_COLLISION,
+                Stage::Master,
+                format!(
+                    "{} 組色標落進同一個封閉區——線稿在它們之間有缺口。\
+                     請在每一組的兩點之間補線（座標成對列出）",
+                    grown.collisions.len()
+                ),
+            )
+            .with_coords(coords),
+        );
+    }
 
-            if let Some(stat) = hist.get(&RESERVED_COLOR) {
-                let mut coords = Coords::master();
-                coords.push(stat.first.0, stat.first.1);
-                out.push(
-                    Diagnostic::error(
-                        code::RESERVED_COLOR,
-                        Stage::Master,
-                        format!(
-                            "flats 使用了保留色 #FF00FF（{}px）。它是 assets-spec §6.1 縫隙檢查\
-                             的底色，請換一個顏色",
-                            stat.area
-                        ),
-                    )
-                    .with_coords(coords),
-                );
-            }
-            UniqueColors {
-                count: hist.len(),
-                exact: true,
-            }
+    // 已由 `merge_small_orphans` 依面積遞減排序，座標順序即「該先看哪個」（§5）。
+    if !orphans.is_empty() {
+        let mut coords = Coords::master();
+        for o in orphans {
+            coords.push(o.anchor.0, o.anchor.1);
         }
-    };
+        out.push(
+            Diagnostic::error(
+                code::ORPHAN_AREA,
+                Stage::Master,
+                format!(
+                    "{} 個封閉區沒有色標（最大一處 {}px），漏點了。\
+                     **一個封閉區一個點，不是一個顏色一個點**——\
+                     線稿把一片顏色切成幾塊，就要點幾個點。門檻 {MIN_ORPHAN_AREA}px",
+                    coords.total(),
+                    orphans[0].area
+                ),
+            )
+            .with_coords(coords),
+        );
+    }
 
-    (out, unique_colors)
+    out
 }
 
 /// `shade` 不得有 luma < 60 的像素——那個暗度只可能是線稿（`assets-spec §4.4`）。
@@ -217,25 +224,87 @@ mod tests {
         }
     }
 
-    #[test]
-    fn alpha_below_255_is_an_unassigned_pixel() {
-        let mut rgba = vec![255u8; 4 * 4];
-        rgba[4 * 2 + 3] = 254;
-        let (out, _) = flats(&image(2, 2, rgba));
-        let d = out
-            .iter()
-            .find(|d| d.code == code::UNASSIGNED_PIXEL)
-            .unwrap();
-        assert_eq!(d.coords, vec![(0, 1)]);
+    fn seed_at(x: u32, y: u32, solid_area: u32) -> Seed {
+        Seed {
+            anchor: (x, y),
+            color: [0, 0, 0],
+            solid_area,
+        }
     }
 
+    fn grown(collisions: Vec<(u32, u32)>, on_line: Vec<u32>) -> Grown {
+        Grown {
+            labels: Vec::new(),
+            collisions,
+            on_line,
+        }
+    }
+
+    /// §4.4：四條互相獨立，一次全報。少報一條就等於多一次退件往返。
     #[test]
-    fn reserved_magenta_is_reported_with_its_first_coordinate() {
-        let mut rgba: Vec<u8> = std::iter::repeat_n([9u8, 9, 9, 255], 4).flatten().collect();
-        rgba[4..8].copy_from_slice(&[255, 0, 255, 255]);
-        let (out, _) = flats(&image(2, 2, rgba));
-        let d = out.iter().find(|d| d.code == code::RESERVED_COLOR).unwrap();
-        assert_eq!(d.coords, vec![(1, 0)]);
+    fn all_four_seed_problems_are_reported_at_once() {
+        let list = [
+            seed_at(10, 10, 4), // 太小
+            seed_at(20, 20, 999),
+            seed_at(30, 30, 999),
+            seed_at(40, 40, 999), // 壓線
+        ];
+        let orphans = [Orphan {
+            area: 900,
+            anchor: (50, 50),
+        }];
+        let out = seeds(&list, &grown(vec![(1, 2)], vec![3]), &orphans);
+
+        let codes: Vec<&str> = out.iter().map(|d| d.code).collect();
+        assert!(codes.contains(&code::SEED_TOO_SMALL), "{codes:?}");
+        assert!(codes.contains(&code::SEED_ON_LINE), "{codes:?}");
+        assert!(codes.contains(&code::SEED_COLLISION), "{codes:?}");
+        assert!(codes.contains(&code::ORPHAN_AREA), "{codes:?}");
+    }
+
+    /// collision 的座標**成對**列出——繪師要知道在哪兩點之間補線，
+    /// 只給一個點他無從下手。
+    #[test]
+    fn a_collision_reports_both_anchors_as_a_pair() {
+        let list = [seed_at(1, 1, 999), seed_at(7, 3, 999)];
+        let out = seeds(&list, &grown(vec![(0, 1)], Vec::new()), &[]);
+        let d = out.iter().find(|d| d.code == code::SEED_COLLISION).unwrap();
+        assert_eq!(d.coords, vec![(1, 1), (7, 3)]);
+    }
+
+    /// orphan 依面積遞減——「該先看哪個」是報告的排序依據（§5）。
+    #[test]
+    fn orphan_coords_keep_the_largest_first_ordering() {
+        let orphans = [
+            Orphan {
+                area: 9000,
+                anchor: (9, 9),
+            },
+            Orphan {
+                area: 600,
+                anchor: (1, 1),
+            },
+        ];
+        let out = seeds(&[], &grown(Vec::new(), Vec::new()), &orphans);
+        let d = out.iter().find(|d| d.code == code::ORPHAN_AREA).unwrap();
+        assert_eq!(d.coords, vec![(9, 9), (1, 1)]);
+        assert!(d.message.contains("9000px"), "{}", d.message);
+    }
+
+    /// 一張乾淨的素材不該產生任何色標診斷。
+    #[test]
+    fn a_clean_asset_produces_no_seed_diagnostics() {
+        let list = [seed_at(1, 1, 999)];
+        assert!(seeds(&list, &grown(Vec::new(), Vec::new()), &[]).is_empty());
+    }
+
+    /// 白底交付的線稿：alpha 全滿 → 整張都判成線。這是 `line-coverage` 的唯一用途。
+    #[test]
+    fn an_opaque_lineart_is_a_coverage_warning_not_an_error() {
+        let out = line_coverage(1.0);
+        assert_eq!(out[0].code, code::LINE_COVERAGE);
+        assert_eq!(out[0].severity, crate::report::Severity::Warning);
+        assert!(line_coverage(MAX_LINE_RATIO).is_empty(), "門檻上不報");
     }
 
     #[test]

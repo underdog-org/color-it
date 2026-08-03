@@ -1,48 +1,14 @@
-//! 唯一色掃描 → connected components → RegionMap（`specs/baker-core-design.md §2.1`）。
+//! 色標 flood fill → 測地擴張 → RegionMap（`specs/baker-seeds.md §3`）。
+//!
+//! 區域由**線稿**決定，不由顏色決定。`grow` 讓每個色標各自吃下自己的封閉區，
+//! `close` 再把線像素本身瓜分掉，讓 `region_ids` 全覆蓋。
 
 use std::cmp::Reverse;
-use std::collections::HashMap;
 
 use crate::seeds::Seed;
 
-pub const MAX_UNIQUE_COLORS: usize = 1024;
-pub const MIN_COLOR_AREA: u32 = 100;
-
-/// `#FF00FF` 是 `assets-spec §6.1` 縫隙檢查的保留色。
-pub const RESERVED_COLOR: [u8; 3] = [255, 0, 255];
-
-#[derive(Debug, Clone, Copy)]
-pub struct ColorStat {
-    pub area: u32,
-    /// raster order 第一次出現的位置。
-    pub first: (u32, u32),
-}
-
-/// `Err(n)` 代表唯一色數超過 `MAX_UNIQUE_COLORS`，直方圖在第 n 個顏色就放棄了——
-/// 這時面積資訊沒有意義，也不該讓 HashMap 長到幾百萬筆。
-pub fn color_histogram(rgba: &[u8], width: u32) -> Result<HashMap<[u8; 3], ColorStat>, usize> {
-    let mut map: HashMap<[u8; 3], ColorStat> = HashMap::new();
-    for (i, px) in rgba.chunks_exact(4).enumerate() {
-        let key = [px[0], px[1], px[2]];
-        match map.get_mut(&key) {
-            Some(stat) => stat.area += 1,
-            None => {
-                if map.len() >= MAX_UNIQUE_COLORS {
-                    return Err(map.len() + 1);
-                }
-                let i = i as u32;
-                map.insert(
-                    key,
-                    ColorStat {
-                        area: 1,
-                        first: (i % width, i / width),
-                    },
-                );
-            }
-        }
-    }
-    Ok(map)
-}
+/// 未認領自由區的報錯門檻（母帶）。低於此值視為線稿的小洞，併進鄰居。
+pub const MIN_ORPHAN_AREA: u32 = 500;
 
 #[derive(Debug, Clone)]
 pub struct RegionMap {
@@ -61,61 +27,31 @@ impl RegionMap {
     pub fn coord(&self, index: u32) -> (u32, u32) {
         (index % self.width, index / self.width)
     }
-}
 
-pub fn label_regions(rgba: &[u8], width: u32, height: u32) -> RegionMap {
-    let (w, h) = (width as usize, height as usize);
-    let mut labels = vec![u32::MAX; w * h];
-    let mut areas = Vec::new();
-    let mut first_pixel = Vec::new();
-    let mut stack: Vec<u32> = Vec::new();
-
-    let color_at = |i: usize| -> [u8; 3] { [rgba[i * 4], rgba[i * 4 + 1], rgba[i * 4 + 2]] };
-
-    for seed in 0..w * h {
-        if labels[seed] != u32::MAX {
-            continue;
-        }
-        let id = areas.len() as u32;
-        let target = color_at(seed);
-        let mut area = 0u32;
-
-        labels[seed] = id;
-        stack.push(seed as u32);
-        while let Some(p) = stack.pop() {
-            area += 1;
-            let p = p as usize;
-            let (x, y) = (p % w, p / w);
-            let mut visit = |n: usize, stack: &mut Vec<u32>| {
-                if labels[n] == u32::MAX && color_at(n) == target {
-                    labels[n] = id;
-                    stack.push(n as u32);
-                }
-            };
-            if x > 0 {
-                visit(p - 1, &mut stack);
-            }
-            if x + 1 < w {
-                visit(p + 1, &mut stack);
-            }
-            if y > 0 {
-                visit(p - w, &mut stack);
-            }
-            if y + 1 < h {
-                visit(p + w, &mut stack);
+    /// 從已全覆蓋的 label map 統計面積與 raster order 首像素。
+    ///
+    /// **前提是 `close` 已跑完**：留著 `UNASSIGNED` 會 panic，因為那代表
+    /// `region_ids` 有洞，而 App 端不容許沒有 id 的像素（§3.1 ②）。
+    pub fn from_labels(labels: Vec<u32>, width: u32, height: u32, count: u32) -> Self {
+        let n = count as usize;
+        let mut areas = vec![0u32; n];
+        let mut first_pixel = vec![u32::MAX; n];
+        for (i, &id) in labels.iter().enumerate() {
+            assert_ne!(id, UNASSIGNED, "close 之後不該還有未指派像素");
+            let id = id as usize;
+            areas[id] += 1;
+            if first_pixel[id] == u32::MAX {
+                first_pixel[id] = i as u32;
             }
         }
-        areas.push(area);
-        first_pixel.push(seed as u32);
-    }
-
-    RegionMap {
-        width,
-        height,
-        count: areas.len() as u32,
-        labels,
-        areas,
-        first_pixel,
+        Self {
+            width,
+            height,
+            count,
+            labels,
+            areas,
+            first_pixel,
+        }
     }
 }
 
@@ -283,6 +219,119 @@ pub fn find_orphans(labels: &[u32], line: &[bool], width: u32, height: u32) -> V
     out
 }
 
+/// 面積 < `min_area` 的未認領自由區就地併進「面積最大的相鄰區」（§3.1 ④），
+/// 回傳**剩下的**大塊——那些才是 `orphan-area`，是繪師真的漏點了。
+///
+/// 自由區永遠被線像素圍住（否則 `grow` 早就把它吃進去了），所以「相鄰」必須**穿過線**
+/// 去找：由碎片邊界逐環向外走線像素，第一個碰到已標記像素的環決定候選集合，
+/// 其中取 `region_areas` 最大者，平手取較小 id。
+///
+/// 必須在 `close` 之前呼叫——`close` 會把 id 擴散進這些區域，之後就找不到了。
+pub fn merge_small_orphans(
+    labels: &mut [u32],
+    line: &[bool],
+    width: u32,
+    height: u32,
+    region_areas: &[u32],
+    min_area: u32,
+) -> Vec<Orphan> {
+    let (w, h) = (width as usize, height as usize);
+    let mut seen = vec![false; w * h];
+    let mut kept = Vec::new();
+    let mut block: Vec<usize> = Vec::new();
+    let mut stack: Vec<usize> = Vec::new();
+
+    // `labels` 會在迴圈中被寫入，自由與否必須以「非線 ＋ 當下未指派」判定。
+    for start in 0..w * h {
+        if seen[start] || line[start] || labels[start] != UNASSIGNED {
+            continue;
+        }
+        block.clear();
+        seen[start] = true;
+        stack.push(start);
+        while let Some(p) = stack.pop() {
+            block.push(p);
+            for_each_neighbor(p, w, h, |n| {
+                if !seen[n] && !line[n] && labels[n] == UNASSIGNED {
+                    seen[n] = true;
+                    stack.push(n);
+                }
+            });
+        }
+
+        let anchor = ((start % w) as u32, (start / w) as u32);
+        let area = block.len() as u32;
+        if area >= min_area {
+            kept.push(Orphan { area, anchor });
+            continue;
+        }
+        if let Some(id) = nearest_region(&block, labels, line, w, h, region_areas) {
+            for &p in &block {
+                labels[p] = id;
+            }
+        }
+    }
+
+    kept.sort_by_key(|o| (Reverse(o.area), o.anchor.1, o.anchor.0));
+    kept
+}
+
+/// 由 `block` 穿過線像素向外 BFS，回傳最近一環上「面積最大」的已標記 region id。
+/// 走不到任何已標記像素（整張圖沒有 seed）時回傳 `None`。
+fn nearest_region(
+    block: &[usize],
+    labels: &[u32],
+    line: &[bool],
+    w: usize,
+    h: usize,
+    region_areas: &[u32],
+) -> Option<u32> {
+    let mut visited: std::collections::HashSet<usize> = block.iter().copied().collect();
+    let mut frontier: Vec<usize> = block.to_vec();
+    let mut next: Vec<usize> = Vec::new();
+
+    while !frontier.is_empty() {
+        let mut candidates: Vec<u32> = Vec::new();
+        next.clear();
+        for &p in &frontier {
+            for_each_neighbor(p, w, h, |n| {
+                if !visited.insert(n) {
+                    return;
+                }
+                if labels[n] != UNASSIGNED {
+                    candidates.push(labels[n]);
+                } else if line[n] {
+                    next.push(n);
+                }
+                // 非線又未指派：另一個自由區塊，不穿過。
+            });
+        }
+        if !candidates.is_empty() {
+            return candidates
+                .into_iter()
+                .min_by_key(|&id| (Reverse(region_areas[id as usize]), id));
+        }
+        std::mem::swap(&mut frontier, &mut next);
+    }
+    None
+}
+
+fn for_each_neighbor(p: usize, w: usize, h: usize, mut f: impl FnMut(usize)) {
+    let (x, y) = (p % w, p / w);
+    if x > 0 {
+        f(p - 1);
+    }
+    if x + 1 < w {
+        f(p + 1);
+    }
+    if y > 0 {
+        f(p - w);
+    }
+    if y + 1 < h {
+        f(p + w);
+    }
+}
+
 /// 同步 BFS 波前：每輪把所有「與已標記像素相鄰的未指派像素」一次指派完，
 /// 取鄰居中**最小的 id**。
 ///
@@ -445,56 +494,57 @@ mod tests {
         assert_eq!(close(&mut labels, 4, 1), (0, 4));
     }
 
-    fn rgba(pixels: &[[u8; 3]]) -> Vec<u8> {
-        pixels
-            .iter()
-            .flat_map(|c| [c[0], c[1], c[2], 255])
-            .collect()
+    /// §3.1 ④ 的分野：小碎片靜默併入，大塊留下來報 `orphan-area`。
+    #[test]
+    fn small_fragments_merge_and_large_ones_are_reported() {
+        // 9x1：[區 0 x2][線][碎片 x1][線][大塊 x3]，門檻 3
+        let line = vec![false, false, true, false, true, false, false, false, false];
+        let mut labels = vec![0, 0, UNASSIGNED, UNASSIGNED, UNASSIGNED, UNASSIGNED, UNASSIGNED, UNASSIGNED, UNASSIGNED];
+        let kept = merge_small_orphans(&mut labels, &line, 9, 1, &[2], 3);
+
+        assert_eq!(kept.len(), 1, "只有 ≥3px 的那塊該留下來");
+        assert_eq!((kept[0].area, kept[0].anchor), (4, (5, 0)));
+        assert_eq!(labels[3], 0, "1px 碎片穿過線併進區 0");
+        assert_eq!(labels[5], UNASSIGNED, "大塊不動，交給 orphan-area 回報");
     }
 
-    const R: [u8; 3] = [255, 0, 0];
-    const G: [u8; 3] = [0, 255, 0];
-
-    /// §2.1：對角相觸的同色塊在 4-連通下是**兩個**區域。
-    /// 這個 2×2 的四格兩兩對角同色，8-連通會併成 2 區，4-連通是 4 區。
+    /// 碎片兩側都有區域時取**面積最大**的那一邊，不是先掃到的那一邊。
     #[test]
-    fn diagonal_touch_is_not_connected() {
-        let map = label_regions(&rgba(&[R, G, G, R]), 2, 2);
-        assert_eq!(map.count, 4);
-        assert_eq!(map.labels, vec![0, 1, 2, 3]);
-        assert_eq!(map.areas, vec![1, 1, 1, 1]);
+    fn a_fragment_joins_the_largest_neighbour_not_the_first() {
+        // 5x1：[區 0][線][碎片][線][區 1]，區 1 比區 0 大
+        let line = vec![false, true, false, true, false];
+        let mut labels = vec![0, UNASSIGNED, UNASSIGNED, UNASSIGNED, 1];
+        let kept = merge_small_orphans(&mut labels, &line, 5, 1, &[10, 99], 500);
+        assert!(kept.is_empty());
+        assert_eq!(labels[2], 1, "區 1 面積 99 > 區 0 的 10");
     }
 
-    /// 反例：橫向相連的同色確實會被併成一塊（`assets-spec §4.2 ④`）。
+    /// 面積平手取較小 id——與 `close` 的等距規則同一個理由：確定性。
     #[test]
-    fn orthogonally_adjacent_same_color_merges() {
-        let map = label_regions(&rgba(&[R, R, G, G]), 2, 2);
-        assert_eq!(map.count, 2);
-        assert_eq!(map.areas, vec![2, 2]);
+    fn a_tie_in_neighbour_area_goes_to_the_smaller_id() {
+        let line = vec![false, true, false, true, false];
+        let mut labels = vec![0, UNASSIGNED, UNASSIGNED, UNASSIGNED, 1];
+        merge_small_orphans(&mut labels, &line, 5, 1, &[50, 50], 500);
+        assert_eq!(labels[2], 0);
     }
 
+    /// 一個 seed 都沒有 → 沒有鄰居可併，碎片原地不動而不是 panic。
     #[test]
-    fn ids_follow_raster_order_of_first_pixel() {
-        let map = label_regions(&rgba(&[G, G, R, R]), 2, 2);
-        assert_eq!(map.labels, vec![0, 0, 1, 1]);
-        assert_eq!(map.first_pixel, vec![0, 2]);
+    fn a_fragment_with_no_reachable_region_is_left_alone() {
+        let line = vec![false, true, false];
+        let mut labels = vec![UNASSIGNED; 3];
+        assert!(merge_small_orphans(&mut labels, &line, 3, 1, &[], 500).is_empty());
+        assert_eq!(labels, vec![UNASSIGNED; 3]);
     }
 
+    /// `from_labels` 的面積與首像素：`check::output` 的 `region-count-drift`
+    /// 座標全靠 `first_pixel`。
     #[test]
-    fn histogram_bails_out_instead_of_growing_unbounded() {
-        // 每個像素一個顏色，遠超 1024
-        let pixels: Vec<[u8; 3]> = (0..2000u32)
-            .map(|i| [(i >> 8) as u8, (i & 0xff) as u8, 0])
-            .collect();
-        assert!(color_histogram(&rgba(&pixels), 2000).is_err());
-    }
-
-    #[test]
-    fn histogram_records_area_and_first_occurrence() {
-        let hist = color_histogram(&rgba(&[R, G, G, R]), 2).unwrap();
-        assert_eq!(hist[&R].area, 2);
-        assert_eq!(hist[&R].first, (0, 0));
-        assert_eq!(hist[&G].first, (1, 0));
+    fn region_map_from_labels_counts_area_and_first_pixel() {
+        let map = RegionMap::from_labels(vec![1, 1, 0, 0, 1, 1], 3, 2, 2);
+        assert_eq!(map.areas, vec![2, 4]);
+        assert_eq!(map.first_pixel, vec![2, 0]);
+        assert_eq!(map.coord(map.first_pixel[0]), (2, 0));
     }
 
     #[test]
