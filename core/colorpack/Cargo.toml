@@ -11,3 +11,13 @@ name = "colorpack"
 workspace = true
 
 [dependencies]
+# 只為了替 zip 的 `deflate-flate2` 選定 backend（見 root Cargo.toml），本 crate 不直接用它。
+flate2 = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+zip = { workspace = true }
+
+[dev-dependencies]
+jsonschema = { workspace = true }
+proptest = { workspace = true }

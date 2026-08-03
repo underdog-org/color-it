@@ -25,6 +25,17 @@
   ——CI 的 `-scheme` 只讀得到 shared scheme
 - `EngineCanvasView` 用 `CAMetalLayer` 而非 `MTKView`：後者自帶 draw loop，與 `§10.3`
   「渲染由 FrameDriver 驅動」是競爭機制。**列為 E1 待決項**並回寫 `architecture.md §10.3`
+- `core/colorpack` 落地：`.colorpack` 容器的讀寫、`manifest` / `regions.json` 型別、R16 RLE、
+  正規化 `content_hash`。**reader 與 writer 同時做**（不留到 E1）——round-trip 是驗證 writer
+  最便宜的手段，而 reader 只是 zip central directory 解析加 RLE 解碼
+- `content_hash` 定義為「未壓縮內容的正規化串流 SHA-256」而非 hash 整個 zip 檔：
+  `architecture §8.4` 規定文件永遠指向它原本的 `asset_hash`，hash 若受 zip crate 版本或
+  deflate 實作影響，升級一個依賴就會讓全世界的使用者作品失效
+- `.colorpack` 的壓縮方式**由副檔名決定，無例外**：二進位 Stored（runtime 可 mmap 零拷貝取 slice）、
+  JSON Deflate（高區域數的 `regions.json` 到 MB 級）。mtime 固定 zip epoch、deflate level 固定，
+  同輸入重跑位元相同
+- 新增 `contracts/colorpack.schema.json`（SSOT）＋ Rust 端三條對照測試，其中一條刻意餵壞資料，
+  防止 schema 寫鬆之後變成永遠通過的假綠燈
 - **產品改名 `Color It` → `Colorlull`**。原名遭 USPTO 註冊號 5152095（COLORIT，Class 16 著色本／畫材，活體）＋ 營業中的 `colorit.com` 阻擋；候選 Coloree／Colory 有 App Store 撞名，Colorie 的 ASO 被 "calorie" 吞噬。決策與殘留查證項記於新增的 `docs/specs/naming.md`。連帶 crate 前綴 `colorit-*` → `colorlull-*`（`lib.name` 短名不變）
 - `cargo xtask gen-torture`：決定性產生 `assets/source/torture-01/`，12 個壓力區塊（細碎區域、單像素縫隙、1px 棋盤、螺旋、貼邊界特徵），重跑逐位元相同
 - `assets-spec.md` v1.1：補上原始分層檔的返工成本告知（M0 要求「合作前講明」）、`flats` 顏色數判準（無顏色總面積 < 100px）、`shade` 的 luma < 60 判準、`#FF00FF` 列為保留色；碎片門檻明確為**母帶 800px**（對應輸出 200px，此前未指明解析度）；`reference` 的「幾何完全一致」改寫為兩條可機驗規則

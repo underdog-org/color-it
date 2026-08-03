@@ -1,7 +1,9 @@
 # Baker 核心設計
 
 > M1 資產管線的實作規格。範圍：`tools/baker` ＋ `core/colorpack`。
-> 狀態：v1.0（2026-08-03）
+> 狀態：v1.1（2026-08-03）——v1.1 修正膨脹的迭代語意、把抗鋸齒判準改回 `assets-spec` 的面積承諾（唯一色數改為快篩）、
+> 補上 §4 的檢查清冊與 §1 的完整依賴，刪去 §2.4 那條會誤退合格素材的鄰接檢查、定死 4-連通，
+> 並刪去已完成的 `category` 修正。
 > 相關：[roadmap/M1](../roadmap/M1.md)｜[architecture §9](../architecture.md)｜[assets-spec](../assets-spec.md)
 
 ---
@@ -10,22 +12,20 @@
 
 實作前必須先改文件，否則管線核心無法成立。
 
-**(a) 直式比例正名 3:4。** `assets-spec §3` 的母帶「4:5 → 3072×4096」實際是 3:4；`prd §6` 與 `architecture §4.1.1` 的 runtime「4:5 → 1536×1920」則是 4:5。3072→1536 是 ÷2，4096→1920 是 ÷2.133，兩軸倍率不同會壓扁畫面，且 `architecture §9.1` 明訂「4096→2048 是整數倍降採樣，這對 flats 的正確性很重要」在直式路徑上不成立。
+**直式比例正名 3:4。** `assets-spec §3` 的母帶「4:5 → 3072×4096」實際是 3:4；`prd §6` 與 `architecture §4.1.1` 的 runtime「4:5 → 1536×1920」則是 4:5。3072→1536 是 ÷2，4096→1920 是 ÷2.133，兩軸倍率不同會壓扁畫面，且 `architecture §9.1` 明訂「4096→2048 是整數倍降採樣，這對 flats 的正確性很重要」在直式路徑上不成立。
 
 > **決議**：母帶不動（既有兩張直式素材已是 3072×4096），runtime 改為 **1536×2048**，比例名稱改為 **3:4**。兩種比例都是乾淨的 ÷2。像素數 3.15M，仍低於 1:1 的 4.19M，`§4.1.1`「以 1:1 為記憶體上界」的論證不變。
-
-**(b) `category` 的 SSOT 沒跟上。** `architecture.md:1010` 已加入 `cartoon`（六值），`assets-spec §4.5` 仍是五值。SSOT 是 `assets-spec`，需補。
 
 **文件修正清單**（M1 驗收「決策已寫回文件」）：
 
 | 檔案 | 修正 |
 |---|---|
 | `prd §6`、`architecture §4.1.1 / §9.1`、`assets-spec §3` | 直式正名 3:4、runtime 1536×2048 |
-| `assets-spec §4.5` | `category` 補 `cartoon` |
+| `assets-spec §4.2 / §7` | 不動（SSOT 已正確）。記錄釐清：本設計 §2.6 曾以「唯一色數 > 1024」取代「任一顏色總面積 < 100px」，那不是等價替換，v1.1 已改回實判、快篩並存 |
 | `architecture §9.2` | 補：降採樣對象是 ID map、majority 平手規則、膨脹的精確語意 |
-| `architecture §9.3` | 補：未指派像素定義、AA 門檻常數、新增「輸出解析度下區域斷裂」警告 |
+| `architecture §9.3` | 補：未指派像素定義、AA 門檻常數、新增「輸出解析度下區域斷裂」警告，以及 `assets-spec §7` 有而它漏列的三條（保留色、`shade` luma、區域數過多過少） |
 | `architecture §9.4` | 釐清 `palette[]` 與 `suggested_color` 的分工 |
-| `specs/build-infra.md` | `bake` 狀態、`deps-policy` 兩條新依賴 |
+| `specs/build-infra.md` | `bake` 狀態、`deps-policy` 兩條新依賴、`baker` 同時是 bin 與 lib（§1） |
 
 ---
 
@@ -35,6 +35,7 @@
 
 ```
 core/colorpack/            deps: serde, serde_json, zip, sha2
+                           dev-deps: jsonschema（§3.8）、proptest（§6）
   lib.rs        ColorPack::write_to() / ColorPack::open()
   manifest.rs   Manifest serde ＋ schema_version major 檢查
   region.rs     RegionEntry
@@ -43,6 +44,7 @@ core/colorpack/            deps: serde, serde_json, zip, sha2
   hash.rs       content_hash 的正規化定義
 
 tools/baker/               deps: colorlull-colorpack, png, clap, anyhow, serde_json
+                           dev-dep: tempfile（§5.2）
   main.rs       clap 薄殼
   lib.rs        bake(dir, opts) -> Report        管線編排，一條直線
   source.rs     來源目錄解析、meta.json 讀取與驗證
@@ -70,6 +72,10 @@ internal = ["colorpack"]
 internal = ["baker"]
 ```
 
+**`tools/baker` 必須同時是 bin 與 lib。** 現行 `Cargo.toml` 只有 `[[bin]]`，但 `lib.rs` 的 `bake(dir, opts) -> Report` 要被 xtask 呼叫，需補 `[lib] name = "baker"`——package 名 `colorlull-baker`、lib 名用短名，照 `build-infra.md §1` 的慣例。
+
+**版本集中在 root `Cargo.toml` 的 `[workspace.dependencies]`**（既有慣例，同 `build-infra.md §1`）。需新增 `zip`、`jsonschema`、`proptest`、`tempfile`，以及 `colorlull-baker = { path = "tools/baker" }`（xtask 依賴它）。`sha2`、`png`、`clap`、`anyhow`、`serde`、`serde_json` 已在。
+
 鐵律檢查：無 wgpu import ✓｜`core/stroke` 未觸碰 ✓｜`core/colorpack` 無平台 SDK ✓。
 
 ---
@@ -95,7 +101,9 @@ baker <src-dir> [--out <dir>] [--report <path>.json]
 
 以下是架構文件未定義、但實作必須定死的語意。
 
-### 2.1 降採樣的對象是 region ID，不是 RGB
+### 2.1 連通性一律是 4-連通；降採樣的對象是 region ID，不是 RGB
+
+**connected components 用 4-連通**，全文的「相鄰」都指這個。8-連通會把只在對角接觸的兩塊同色區域併成一塊，而 `assets-spec §4.2 ④` 給繪師的心智模型是「相連才會合併」——對角相觸算不算相連，在繪師端是模稜兩可的。取保守的 4-連通，繪師照 `assets-spec §6.1` 的洋紅檢查做就不會意外多併。
 
 一個 2×2 區塊可能同時含 A(紅)、B(綠)、C(紅)，其中 A 與 C 不相鄰所以合法同色。對 RGB 取眾數會得到「紅」但無從得知是哪個區域。**majority 必須作用在 ID map 上。**
 
@@ -109,14 +117,15 @@ baker <src-dir> [--out <dir>] [--report <path>.json]
 
 **`flats` 的 alpha < 255。** 任何 RGB 值都視為某個區域的識別色。這條寫死之後該檢查就是一次線性掃描。
 
-### 2.4 `reference` 一致性不跑第二次 CC
+### 2.4 `reference` 一致性只需一條線性掃描
 
-兩條等價且更便宜的檢查：
+**對每個 flats region，`reference` 在其內部像素同色 —— 否則錯誤 ＋ 首個相異像素座標。** 只有這一條。
 
-1. 對每個 flats region，`reference` 在其內部像素同色 —— 否則錯誤 ＋ 首個相異像素座標
-2. 對每對相鄰 region，`reference` 顏色相異 —— 否則錯誤 ＋ 邊界座標
+推論：若每個 region 內部的 `reference` 都是單一顏色，`reference` 的顏色變化就只可能發生在 `flats` 的邊界上——「`reference` 不引入 `flats` 沒有的邊界」是它的直接結果，不是另一條要檢查的事。
 
-兩條合起來 ⟺「對 `reference` 獨立跑 CC 會得到相同分割」，而且錯誤訊息直接指得出是哪一塊。
+**相鄰區 `reference` 同色是合法的**（`assets-spec §4.3`：同色相接處的邊界消失，`reference` 的邊界通常比 `flats` 少）。任何「相鄰區顏色必須相異」的檢查都會退掉合格素材。
+
+附帶效果：baker **完全不需要建區域鄰接圖**。
 
 ### 2.5 膨脹的語意
 
@@ -124,23 +133,41 @@ ID map 是滿的、沒有洞，所以「膨脹」不可能是填洞，只能是*
 
 ```
 line_mask = 降採樣後 lineart alpha ≥ LINE_ALPHA_THRESHOLD（= 32）的像素
-迭代 2 次：
-  line_mask 內的像素，採用相鄰非 line_mask 像素的 ID
-  （多個候選取母帶面積最小者，平手取 ID 最小）
+resolved  = 所有非 line_mask 像素          ← 每輪擴張
+跑 2 輪，每輪讀上一輪的快照、寫進新緩衝：
+  對 line_mask 內、尚未 resolved 的像素 p：
+    候選 = p 的 4-鄰像素中已 resolved 者的 ID
+    候選非空 → p 取候選中母帶面積最小者（平手取 ID 最小），並加入 resolved
+2 輪後仍未 resolved 的像素：保留降採樣 majority 給的原 ID，不做任何事
 非 line_mask 像素永不被覆寫
 ```
 
+**逐輪擴張的 `resolved` 是關鍵**：若候選來源固定為「非 `line_mask`」，第 2 輪的來源集合與第 1 輪完全相同，等於空跑一輪，線稿帶內側第 2px 的像素永遠拿不到鄰居——實際效果只有 1px。
+
+**每輪必須讀快照、寫新緩衝**：in-place 會讓結果取決於掃描順序，違反 §3.2 的決定性。
+
+鄰域是 §2.1 的 4-鄰：2 輪 4-鄰膨脹正好推進 2px，就是 `architecture §9.2` 陷阱 (2) 要的距離。
+
+**仍未 resolved 的像素保留原 ID**：那是粗線稿的中心帶，本來就被線稿完全遮住，填什麼都看不到；保留 majority 的結果比引入第三種規則便宜也更可預期。
+
 效果是每個區域的邊界被推進線稿中線以下，兩側區域在線底下重疊，majority 與 box 的半像素落差被吸收。這正是它必須在降採樣之後的原因。
 
-### 2.6 `flats` 抗鋸齒偵測
+### 2.6 `flats` 抗鋸齒偵測：快篩 ＋ 實判
 
-**唯一色數 > `MAX_UNIQUE_COLORS`（1024）→ 錯誤。** 常數具名，報告中一律列出實際唯一色數，之後要調有依據。
+兩條都跑，`code` 分開，都在母帶解析度：
 
-間距夠大不會誤判：200 區域的圖開了 AA 會產生數萬個混色；torture 只用 16 色；最複雜的曼陀羅手工分色也遠不到 1024。
+| 檢查 | 定位 |
+|---|---|
+| 唯一色數 > `MAX_UNIQUE_COLORS`（1024）→ 錯誤 | **快篩**。命中代表圖徹底壞掉（例如色彩空間被轉換過），可以在算面積直方圖之前就停，錯誤訊息也更精準 |
+| 任一顏色的總面積 < `MIN_COLOR_AREA`（100px）→ 錯誤 | **實判**。這才是 `assets-spec §4.2 / §7` 對繪師承諾的那條 |
+
+**唯一色數不能拿來取代面積判準。** `assets/source/adventure-time-demo-1/flats.png` 有 171 個顏色、其中 166 個總面積 < 200px（它自己的 `meta.json` 已載明不合規、待重做），唯一色數 171 遠低於 1024——只跑快篩會把一張已知不合規的素材放行。
+
+常數具名。報告中一律列出實際唯一色數，之後要調有依據；違反實判時列出違規的顏色與其面積。
 
 ### 2.7 新增後置警告：區域在輸出解析度下斷成多塊
 
-母帶連通的區域，1px 頸部被降採樣吃掉後可能裂成兩塊。ID 還在（區域數一致檢查會過），但 runtime 的 Mode A 遮罩是 `id == active_region_id`——使用者點一塊，另一塊也會被填。架構文件漏了這條，補為**警告**（不拒收：被線稿切斷的髮束是合理交付）。
+母帶連通的區域，1px 頸部被降採樣吃掉後可能裂成兩塊。ID 還在（區域數一致檢查會過），但 runtime 的 Mode A 遮罩是 `id == active_region_id`——使用者點一塊，另一塊也會被填。架構文件漏了這條，補為**警告**（不拒收：被線稿切斷的髮束是合理交付）。判定用 §2.1 的 4-連通，與母帶 CC 同一套——否則「母帶連通、輸出斷裂」這句話沒有意義。
 
 ---
 
@@ -230,7 +257,34 @@ Gallery 對鎖定的線稿也顯示縮圖（`prd §5.1`），且 `architecture �
 
 ---
 
-## 4. 錯誤處理與報告
+## 4. 檢查清冊與報告
+
+### 4.1 檢查清冊
+
+`code` 是固定字彙表——測試斷言的是特定 `code`（§6），繪師收到的退件也照它分類。新增檢查必須同時進這張表。
+
+| 檢查項 | `code` | 階段 | severity | 來源 |
+|---|---|---|---|---|
+| 四張圖尺寸與對齊一致 | `size-mismatch` | Master | Error | `assets-spec §7`、`arch §9.3` |
+| 長邊 4096、比例 1:1 或 3:4 | `canvas-size` | Master | Error | `assets-spec §7`、`arch §9.3` |
+| 色彩描述檔為 sRGB | `color-space` | Master | Error | `assets-spec §7`、`arch §9.3` |
+| `flats` 唯一色數 > 1024 | `unique-color-overflow` | Master | Error | 本設計 §2.6（快篩） |
+| `flats` 任一顏色總面積 < 100px（**母帶**解析度） | `tiny-color-area` | Master | Error | `assets-spec §7`「`flats` 無抗鋸齒」、`arch §9.3` |
+| `flats` 使用保留色 `#FF00FF` | `reserved-color` | Master | Error | `assets-spec §7` |
+| 未指派像素（`flats` alpha < 255，§2.3） | `unassigned-pixel` | Master ＋ Output | Error | `assets-spec §7`、`arch §9.3` |
+| `reference` 每區顏色唯一（§2.4） | `ref-mismatch` | Master | Error | `assets-spec §7` 的兩列（「每區顏色唯一」＋「不含 `flats` 沒有的邊界」，後者是前者的推論）、`arch §9.3` |
+| `shade` 有 luma < 60 的像素 | `shade-too-dark` | Master | Error | `assets-spec §7` |
+| `meta.json` 的 `id` 與資料夾名不一致 | `meta-id-mismatch` | Master | Error | `assets-spec §7`、`arch §9.3` |
+| `meta.json` 的 `category` 非六個允許值 | `meta-bad-category` | Master | Error | `assets-spec §7`、`arch §9.3` |
+| 降採樣後區域數與母帶不一致 | `region-count-drift` | Output | Error | `assets-spec §7`、`arch §9.3` |
+| 區域數 > 65535 | `region-count-overflow` | Output | Error | `assets-spec §7`、`arch §9.3` |
+| 碎片區域（面積 < 200px，**輸出**解析度） | `tiny-region` | Output | Warning | `assets-spec §7`、`arch §9.3` |
+| 區域數過多或過少 | `region-count-range` | Output | Warning | `assets-spec §7`、`arch §9.3` |
+| 區域在輸出解析度下斷成多塊 | `region-split` | Output | Warning | 本設計 §2.7 |
+
+面積門檻分屬不同解析度，是最容易混用的地方：`tiny-color-area` 的 100px 在**母帶**，`tiny-region` 的 200px 在**輸出**（繪師端對應的母帶數字是 800px，見 `assets-spec §7` 註）。
+
+### 4.2 報告
 
 ```rust
 struct Diagnostic {
@@ -261,9 +315,11 @@ struct Diagnostic {
 | 產物 | 定位 |
 |---|---|
 | `assets/source/torture-01/` | **合格**壓力素材。所有特徵 ≥4px 且對齊偶數邊界（降採樣後仍 ≥2px）。區域數上萬，`has_shade = false`，3:4 |
-| `tools/baker/tests/fixtures/`（生成器程式碼） | 5 組預期拒收：`gap`（未指派像素）、`ref-mismatch`、`display-p3`、`antialiased`、`vanishing-1px`（現行的 1px 特徵搬來） |
+| `tools/baker/tests/fixtures/`（生成器程式碼） | 5 組預期拒收：`gap`（未指派像素）、`ref-mismatch`（在某一塊裡塗第二個顏色——不是相鄰區同色，那是合法的）、`display-p3`、`antialiased`、`vanishing-1px`（現行的 1px 特徵搬來） |
 
-`torture-01` 補產 `reference.png`：`reference[p] = PERM[flats[p]]`，`PERM` 是 0..15 的固定雙射。雙射保序相鄰相異，所以邊界一致性與每區單一純色都成立；但檔案位元 ≠ `flats.png`，能抓到「baker 偷懶直接比檔案而非比區域」的錯誤實作。
+**生成器重寫時 `PALETTE` 必須移除 `#FF00FF`。** `xtask/src/torture.rs` 的 `PALETTE[5] = [255, 0, 255]`，而 `c()` 回傳 1..=15——洋紅確實出現在現行的 `flats.png`。那是 `assets-spec §6.1` 縫隙檢查的保留色（清冊裡的 `reserved-color`），所以即使把所有特徵重做成 ≥4px，`torture-01` 仍會被 baker 自己拒收。改用另一個高飽和、且與其餘 15 色差異夠大的顏色。
+
+`torture-01` 補產 `reference.png`：`reference[p] = PERM[flats[p]]`，`PERM` 是 0..15 的固定雙射。雙射保證每區仍是單一純色（§2.4 唯一的那條檢查），但檔案位元 ≠ `flats.png`，能抓到「baker 偷懶直接比檔案而非比區域」的錯誤實作。
 
 ### 5.2 negative fixture 不進 git
 
