@@ -5,7 +5,8 @@ iOS 著色 App。核心是「**受區域約束的塗抹**」——不是繪圖�
 
 **當前**：S0 契約定義收尾（W4，見 `docs/roadmap/S0.md`）。Rust 側與 iOS 骨架都已落地——`core/engine` 是 headless mock（FFI 表面與語意條款記在 `docs/contracts.md`），`apps/ios/ColorApp.xcodeproj` 有三個 target ＋ 五條路由，`EngineBridgeTests` 八條全綠（含 Mock↔Rust 差分測試）。**剩三條驗收要在模擬器上人工走一遍**（靜態圖畫布、tap→progress、五條路由導航）。
 > 開 Xcode 前先跑 `cargo xtask ios`——`apps/ios/Generated/` 是 gitignore 的產物（`apps/ios/README.md`）。
-**M0 未結的兩件事**：`adventure-time-demo-1/flats.png` 待重做、繪師徵才 JD 待發。
+**色標交付（`specs/baker-seeds.md`）Phase 0–4 全部完成**：交付改成 `lineart` ＋ `seeds.png`，區域由線稿封閉區決定；`flats.png`／`reference.png` 與 `migrate.rs` 已刪；`assets-spec.md` 升到 v2.0（§0 可整段複製進 JD）。
+**M0 未結的一件事**：繪師徵才 JD 待發（內容取 `assets-spec.md §0`）。兩支 demo 的 `seeds.png` 是由已廢止的 `reference.png` 反推的，繪師依 v2.0 重交後才算真正走過交付流程。
 
 > 產品原名 `Color It`，2026-08-03 因商標衝突改名 **Colorlull**（`docs/specs/naming.md`）。
 > 目錄名 `color-it/` 尚未改，`architecture.md §3` 的結構圖照現況寫。

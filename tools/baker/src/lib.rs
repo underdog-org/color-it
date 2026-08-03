@@ -12,7 +12,6 @@ pub mod compose;
 pub mod debug_out;
 pub mod dilate;
 pub mod image;
-pub mod migrate;
 pub mod report;
 pub mod resample;
 pub mod seeds;

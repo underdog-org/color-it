@@ -5,6 +5,9 @@
 - 繪師交付改為「線稿＋色標圖」，刪除 flats/reference，區域改由線稿封閉區 flood fill 推導；`.colorpack` 與 App 端零改動。Phase 0 需先驗證線稿封閉性，否決則退回「保留 flats ＋ baker 端量化 snap」
 - baker 新增 golden test：固定素材 → 凍結 `region_ids` 與 `content_hash`，守住 `grow`／`merge_small_orphans`／`close` 的確定性（舊 `label_regions` 是精確色比對，確定性是白送的）
 - baker 新增 `--debug-out <dir>`：`preview.png`／`seeds-overlay.png`／`reference-preview.png`／`regions.json` 四件**退件附件**，拒收路徑照樣產出
+- `assets-spec.md` v2.0：交付改成 `lineart` ＋ `seeds.png`（＋選配 `shade`），`flats`／`reference` 廢止；`§0` 是可整段複製進 JD 的一頁摘要；線稿封閉性升格為硬性要求；Procreate 現在整套都能用
+- 刪除 `assets/source/*/flats.png`、`reference.png`（LFS）與過渡用的 `baker::migrate` ＋ `xtask seeds-from-reference`
+- `architecture.md §9`、`roadmap/M0.md`、`docs/README.md` 同步到新契約
 - 診斷報告加座標聚類（`shade-too-dark` 之類的逐像素症狀不再吐 16 個散落座標）與可疑度排序（`line-coverage` 排在它會解釋掉的色標錯誤之前）
 
 ## [v0.2]

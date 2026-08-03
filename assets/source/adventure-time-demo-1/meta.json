@@ -2,5 +2,5 @@
   "id": "adventure-time-demo-1",
   "title": "Adventure Time Demo 1",
   "category": "cartoon",
-  "notes": "M0 試作素材 B：4:5（3072×4096）、含 shade。⚠️ flats.png 目前不合規，待以 CSP 重做——現版是成品插畫的色彩量化結果（171 色、其中 166 色總面積 <200px），且有 7 個區域跨線稿合併、合計佔畫布 57.66%。reference.png 的幾何才是對的（99.95% 對齊線稿），重做時以它為準。⚠️ 第三方 IP 的暫代素材，僅供內部驗證，不得上線。"
+  "notes": "M0 試作素材 B：3:4（3072×4096）、含 shade。seeds.png 由已廢止的 reference.png 反推而來（62 個封閉區各一點），不是繪師依 assets-spec v2.0 交付的。⚠️ 第三方 IP 的暫代素材，僅供內部驗證，不得上線。"
 }

@@ -1,7 +1,8 @@
 # baker · 色標交付（seeds）
 
-> 狀態：草案（2026-08-03）｜取代 [assets-spec](./assets-spec.md) §4.2 §4.3 §5 §6、[baker-core-design](./baker-core-design.md) §2.1 §2.3 §2.4
+> 狀態：**已實作**（2026-08-03，Phase 0–4 全部完成）｜設計理由文件，繪師端規格見 [assets-spec v2.0](./assets-spec.md)
 >
+> 取代 [baker-core-design](./baker-core-design.md) §2.1 §2.3 §2.4。
 > `.colorpack` 格式、App 端、`check/output.rs`、`resample` / `dilate` / `thumb` 一律不動。
 
 ## 1. 為什麼改
@@ -188,10 +189,18 @@ thumb → resample → dilate → check::output → 打包                     �
 
 **這一步的結果決定本案能不能走。** 若 `adventure-time-demo-1` 的線稿封閉性撐不住（大量 collision，且缺口是風格而非疏忽），退回退路方案（§8）。這是整個計畫唯一的不可逆風險點。
 
-**Phase 1** `binarize` + `seeds` + `grow` + `close` + 新診斷碼
-**Phase 2** `synth.rs` 改寫 + 三張測試網
-**Phase 3** `--debug-out` 四件產物 + 座標聚類 + 可疑度排序
-**Phase 4** `assets-spec.md` 重寫（§4.2 §4.3 §5 §6 大改），產出可直接附進繪師 JD 的版本
+**Phase 1** ✅ `binarize` + `seeds` + `grow` + `close` + 新診斷碼
+**Phase 2** ✅ `synth.rs` 改寫 + golden test（凍結 `region_ids` 與 `content_hash`）+ 階段內不 fail-fast 迴歸
+**Phase 3** ✅ `--debug-out` 四件產物 + 座標聚類 + 可疑度排序
+**Phase 4** ✅ `assets-spec.md` v2.0（§0 是可整段複製進 JD 的一頁摘要）
+
+### 實作後與本文的三處出入
+
+1. **差分測試沒做**（§6 第 3 條）。它要拿 `flats.png` 當基準，而 Phase 0 已判定那張不合規；改用 `reference.png` 又只能在本地跑（demo 素材走 LFS，CI 以 `lfs: false` checkout）。golden test 涵蓋了同一個風險，這條就不補了。
+2. **座標聚類不是一體適用**（§5）。色標的四條診斷不聚類——`seed-collision` 的兩個 anchor 若被聚成一叢，「在這兩點之間補線」就沒有意義了。只有 `shade-too-dark` 這種逐像素症狀與輸出階段的診斷才聚。
+3. **`preview.png` 的配色依鄰接關係挑，不是「隨機」**（§5）。region id 是 raster order，空間上相鄰的兩區 id 不一定相鄰，照 id 上色會讓相鄰兩區拿到相近的顏色——那正好毀掉這張圖唯一的用途。
+
+`migrate.rs`（`reference.png` → `seeds.png` 的過渡橋）與 `assets/source/*/flats.png`、`reference.png` 已於 Phase 4 一併刪除。兩支 demo 的 `seeds.png` 是反推產物，繪師依 v2.0 重交後即為正式素材。
 
 ### Phase 0 實測結果（2026-08-03，`adventure-time-demo-1`）
 
