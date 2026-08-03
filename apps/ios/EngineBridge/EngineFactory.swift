@@ -7,8 +7,8 @@ import Foundation
 
 /// 建引擎的**唯一**入口。Shell 呼叫它，然後就只認得 `any EngineProtocol`。
 ///
-/// 為什麼選擇邏輯在 Bridge 而不在 `ColorApp.swift`（`specs/ios-scaffold.md §6` 的原始寫法）：
-/// 驗收要求「App Shell 端沒有任何一行直接引用 `RustEngine`」，而 `§9` 的 `lint-ios`
+/// 為什麼選擇邏輯在 Bridge 而不在 `ColorApp.swift`：
+/// 驗收要求「App Shell 端沒有任何一行直接引用 `RustEngine`」，而 `cargo xtask lint-ios`
 /// 是純文字檢查。`RustEngineAdapter` 這個字面上就含有 `RustEngine`——只要 Shell 寫得出
 /// 這個型別名，機械檢查就不可能同時是嚴格的又是通得過的。
 ///

@@ -12,23 +12,13 @@
 | [architecture.md](./architecture.md) | **怎麼做** — 技術選型、分層、渲染、契約、持久化 | 1445 行 |
 | [roadmap/](./roadmap/README.md) | **什麼時候做、做完怎麼算** — 12 個里程碑 ＋ 決策點 | 每份 38–90 行 |
 | [specs/assets-spec.md](./specs/assets-spec.md) | 繪師交付規格（PNG ＋ meta.json 硬性要求） | v2.0 |
-| [specs/baker-seeds.md](./specs/baker-seeds.md) | 色標交付設計：為什麼區域改由線稿封閉區推導、`grow`／`close` 的規則（**已實作**；繪師端規格看 `assets-spec.md`） | 短 |
-| [specs/build-infra.md](./specs/build-infra.md) | workspace 佈局、依賴 lint 規則、CI 形狀（M0 基建） | 短 |
+| [specs/baker-core-design.md](./specs/baker-core-design.md) | **`tools/baker` ＋ `core/colorpack` 的 SSOT**：色標交付管線、`.colorpack` 容器、檢查清冊、測試（**已實作**） | 長 |
 | [specs/naming.md](./specs/naming.md) | 產品名稱決策記錄（為何不叫 Color It）＋ 上架前必補的查證項 | 短 |
 | [specs/ffi-contract.md](./specs/ffi-contract.md) | uniffi 型別與方法表、headless mock、`xtask ios`（S0 Rust 契約**設計**） | 509 行 |
-| [specs/ios-scaffold.md](./specs/ios-scaffold.md) | Xcode 專案佈局、`EngineProtocol` / `MockEngine` / `RustEngineAdapter`、五條路由、Swift 測試與 CI gate（S0 iOS 側） | 短 |
-| [specs/E1-spec-plan.md](./specs/E1-spec-plan.md) | E1 六份 spec 的拆分依據、型別歸屬、撰寫約束（**不是 spec**） | 短 |
-| [specs/E1-wgpu.md](./specs/E1-wgpu.md) | `RenderContext`、`DocumentResources` 七資源、pass ↔ 資源矩陣、mask uniform（**其餘四份只引用**） | 短 |
-| [specs/E1-composite.md](./specs/E1-composite.md) | Pass 3 六層 WGSL、色彩空間、`set_viewport`、擴散動畫 buffer、Mask Mode | 短 |
-| [specs/E1-stroke.md](./specs/E1-stroke.md) | `generate_dabs` 契約、One-Euro ＋ Catmull-Rom、`BrushPreset`、Pass 1／2 | 短 |
-| [specs/E1-bucket.md](./specs/E1-bucket.md) | `document.apply(Op)` 最小版、`tap` → region ID、擴散動畫 CPU 側 | 短 |
-| [specs/E1-input.md](./specs/E1-input.md) | present 路徑定案、FrameDriver、`InputAdapter`、座標系、`cancelStroke` | 短 |
-| [specs/E1-perf.md](./specs/E1-perf.md) | motion-to-photon 流程、記憶體對帳、D2／D3／D4 劇本、調校項總表 | 短 |
-| [perf-baseline.md](./perf-baseline.md) | **實測數字**（流程在 `E1-perf`）：各裝置的 m2p／frame p99／記憶體，調校記錄 | 短 |
+| [perf-baseline.md](./perf-baseline.md) | **效能量測方法 ＋ 實測數字**：m2p 流程、對帳、D2／D3／D4 劇本、調校記錄 | 短 |
 | [contracts.md](./contracts.md) | FFI 的**現況**：表面速查表、語意條款 C1–C13、semver 判定、遷移記錄 | 短 |
 
 `roadmap/` 已全部拆檔，一次只讀需要的那一份。
-六份 `E1-*` 也是一組，**先讀 `E1-wgpu`**——其餘五份以它為共同輸入。
 
 ---
 
@@ -57,32 +47,25 @@
 | 動 core crate 的介面 | `§5` Core crate 設計 |
 | 動 FFI / uniffi / JSON schema | `§7` 契約層 ＋ `specs/ffi-contract.md` |
 | 動存檔、oplog、Undo、崩潰復原 | `§8` 狀態與持久化 |
-| 動 baker、`.colorpack` 格式 | `§9` 資產管線 ＋ `specs/assets-spec.md` |
-| 繪師交付要交哪幾張圖 | `specs/assets-spec.md`（為什麼這樣改 → `specs/baker-seeds.md`） |
+| 動 baker、`.colorpack` 格式 | `§9` 資產管線 ＋ `specs/baker-core-design.md` |
+| 繪師交付要交哪幾張圖 | `specs/assets-spec.md`（為什麼這樣改 → `specs/baker-core-design.md §1`） |
 | 動 iOS 整合、手勢、frame pacing | `§10` 平台整合 |
 | 動 R2、備份、雲端 | `§11` 雲端 |
-| 動 CI / 建置流程 | `§12` 建置與 CI ＋ `specs/build-infra.md` |
-| 動 workspace 骨架、依賴 lint、xtask 指令 | `specs/build-infra.md` |
+| 動 CI / 建置流程 | `§12` 建置與 CI |
+| 動 workspace 骨架、依賴 lint、xtask 指令 | `§3` repo 結構 ＋ `architecture.md §12` |
 | 產品叫什麼、名稱還有哪些沒查 | `specs/naming.md` |
 | 動 FFI 型別／方法簽章、uniffi 生成、`ffi-lock.toml` | `specs/ffi-contract.md` ★ |
-| 動 Xcode 專案、`EngineBridge`、五條路由、Swift 測試 | `specs/ios-scaffold.md` ＋ `apps/ios/README.md` |
+| 動 Xcode 專案、`EngineBridge`、五條路由、Swift 測試 | `apps/ios/README.md` |
 | 某方法現在到底做了什麼、Swift Bridge 能假設什麼 | `contracts.md` ② ③ ★ |
 | FFI 改動算 major 還是 minor、遷移怎麼記 | `contracts.md` ④ ⑤ |
-| 效能目標、量測 | `§13` 效能觀測 ＋ `specs/E1-perf.md` |
+| 效能目標、量測 | `§13` 效能觀測 ＋ `perf-baseline.md` |
 | 風險與退路 | `§14` |
 
-### E1 面（specs/E1-*.md）
+### 渲染／筆刷／油漆桶（已落地，回寫進 architecture.md）
 
-| 何時 | 檔案 |
-|---|---|
-| 動 wgpu 資源、格式、pass 的讀寫權 | `E1-wgpu.md` ★ 六份的共同輸入 |
-| 動 composite、色彩空間、viewport、Mask Mode | `E1-composite.md` |
-| 動筆刷、濾波、插值、`BrushPreset`、Pass 1／2 | `E1-stroke.md` |
-| 動油漆桶、`document.apply`、擴散動畫的推進 | `E1-bucket.md` |
-| 動 iOS 輸入、FrameDriver、座標系 | `E1-input.md` |
-| 要量什麼、怎麼量、D2／D3／D4 怎麼跑 | `E1-perf.md` |
-| 現在量到多少、某個參數是量出來的還是猜的 | `perf-baseline.md` |
-| 為什麼是這樣切、哪份擁有哪個型別 | `E1-spec-plan.md` |
+E1 期把渲染、筆刷、油漆桶、輸入定案為六份 spec；里程碑收尾時決策已回寫進 `architecture.md` 與
+`contracts.md`，spec 已刪除。現在查這幾塊的設計 → `architecture.md §4`／`§5`／`§10` 與 `contracts.md`
+語意條款；某個參數是量出來的還是猜的 → `perf-baseline.md` 調校記錄。
 
 ### 排程面（roadmap/）
 

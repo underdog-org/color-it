@@ -9,7 +9,7 @@ import Foundation
 ///
 /// `Settings` 與 `Subscription` 不在其中——它們走 `.sheet`：付費牆是 modal，
 /// 設定也是進去就出來，兩者都不該堆在 Gallery → Canvas 的返回堆疊上
-/// （`specs/ios-scaffold.md §6`）。
+/// （`apps/ios/README.md`「既有決策」）。
 enum Route: Hashable {
     case canvas(assetID: String)
     case share

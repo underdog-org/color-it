@@ -1,6 +1,6 @@
 // !$*UTF8*$!
 //
-// 唯一手工維護的 Xcode 檔（specs/ios-scaffold.md §2）。
+// 唯一手工維護的 Xcode 檔。
 //
 // 三個 target 各掛一個 PBXFileSystemSynchronizedRootGroup（Xcode 16+），所以**新增
 // Swift 檔完全不動這個檔**——它只在改 build setting 或加 target 時才進 diff。
@@ -309,7 +309,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "# 只檢查，**不代跑 cargo**（specs/ios-scaffold.md §2）。\n# 自動跑 `cargo xtask ios` 會讓每次 Xcode build 都可能變成一趟 release 編譯，\n# build 時間不可預測。CI 上 `cargo xtask ios` 本來就排在 xcodebuild 前面。\nset -eu\n\nswift_binding=\"${SRCROOT}/Generated/Sources/colorlull_engine.swift\"\nxcframework=\"${SRCROOT}/Generated/ColorlullEngine.xcframework\"\n\nif [ ! -f \"${swift_binding}\" ] || [ ! -d \"${xcframework}\" ]; then\n  echo \"error: apps/ios/Generated/ 不存在或不完整。\"\n  echo \"error: 它是 gitignore 的產物，請先在 repo 根目錄跑：cargo xtask ios\"\n  echo \"error: 詳見 apps/ios/README.md\"\n  exit 1\nfi\n";
+			shellScript = "# 只檢查，**不代跑 cargo**。\n# 自動跑 `cargo xtask ios` 會讓每次 Xcode build 都可能變成一趟 release 編譯，\n# build 時間不可預測。CI 上 `cargo xtask ios` 本來就排在 xcodebuild 前面。\nset -eu\n\nswift_binding=\"${SRCROOT}/Generated/Sources/colorlull_engine.swift\"\nxcframework=\"${SRCROOT}/Generated/ColorlullEngine.xcframework\"\n\nif [ ! -f \"${swift_binding}\" ] || [ ! -d \"${xcframework}\" ]; then\n  echo \"error: apps/ios/Generated/ 不存在或不完整。\"\n  echo \"error: 它是 gitignore 的產物，請先在 repo 根目錄跑：cargo xtask ios\"\n  echo \"error: 詳見 apps/ios/README.md\"\n  exit 1\nfi\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 

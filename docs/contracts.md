@@ -25,7 +25,7 @@ S0 驗收「`EngineProtocol.swift` 與 Rust FFI 表面逐一對照無缺漏」�
 | 方法 | fallible | 實際實作於 | v0 狀態 |
 |---|---|---|---|
 | `new(pack_path, doc_path)` | ✅ | `engine.rs` | **E1 起真的解析 `.colorpack`**：`total_regions` 與 `region_ids` 都從它來，開不了或 hash 不符回 `Pack`。`doc_path` 仍忽略（E3） |
-| `attach_surface(handle)` | ✅ | `engine.rs` | **v0 的「永遠 `Ok`」已失效**（`specs/E1-wgpu.md §2.2`）：E1 起真的建 device／surface／`DocumentResources`，失敗回新的 `EngineError::Surface`。Bridge 顯示錯誤態，**不得 crash**——畫作還在 engine 裡 |
+| `attach_surface(handle)` | ✅ | `engine.rs` | **v0 的「永遠 `Ok`」已失效**：E1 起真的建 device／surface／`DocumentResources`（`maximumDrawableCount = 2`，`present_mode = Fifo`），失敗回新的 `EngineError::Surface`。Bridge 顯示錯誤態，**不得 crash**——畫作還在 engine 裡 |
 | `resize_surface(w, h, scale)` | — | `engine.rs` | 重設 surface configuration 並重算 fit-to-screen 的 `Transform`；未 attach 時 no-op |
 | `detach_surface()` | — | `engine.rs` | **只丟 surface**，device 與文件資源留著（C5） |
 | `set_tool(tool)` | — | `ffi.rs` → `app-state` | 真的寫進 `AppState`，emit |
@@ -38,7 +38,7 @@ S0 驗收「`EngineProtocol.swift` 與 Rust FFI 表面逐一對照無缺漏」�
 | `undo()` / `redo()` | — | `engine.rs` | no-op ＋ 一次性 log（E3） |
 | `render()` | — | `engine.rs` → `render` | 推進擴散動畫 ＋ Pass 3 Composite。infallible：掉 frame 與取不到 drawable 都不是錯誤。無 surface 時什麼都不做 |
 | `set_viewport(transform)` | — | `engine.rs` | 覆寫 `Inner::transform`。E1 的 transform 由 attach／resize 自算 fit-to-screen，這支是 E2 縮放平移的入口 |
-| `set_mask_mode(mode)` | — | `engine.rs` → `render` | **Debug 專用**，D4 的 A／B 比較（`specs/E1-perf.md §5`）。一次 `write_buffer`，不重建 pipeline，筆畫進行中切也不掉 frame。不 emit。**決策拍板後與 Swift 端的 toggle 一起移除** |
+| `set_mask_mode(mode)` | — | `engine.rs` → `render` | **Debug 專用**，D4 的 A／B 比較（劇本見 `perf-baseline.md`）。一次 `write_buffer`，不重建 pipeline，筆畫進行中切也不掉 frame。不 emit。**決策拍板後與 Swift 端的 toggle 一起移除** |
 | `state()` | — | `ffi.rs` | `From<&AppState> for UiState` 投影 |
 | `set_state_listener(opt)` | — | `engine.rs` | 單一 listener，後設覆蓋前設；`None` 是 detach 路徑 |
 | `save()` | ✅ | `engine.rs` | `Err(NotImplemented { milestone: "E3" })` |
@@ -77,10 +77,10 @@ Swift 端不會想每 frame `try`。表上沒有 `makeCanvasView()`，那是 Bri
 | C6 | `pick_color` 同步回傳，接受抬筆時約一 frame 的 stall（S1 實作時複審） |
 | C7 | `makeCanvasView()` 屬 Bridge（包 `CAMetalLayer` 並呼叫 `attach_surface`），不在 FFI——對照表上不算缺漏 |
 | C8 | `UiState` 回呼只在投影結果**真的改變**時發送；連續兩次相同狀態只會收到一次 |
-| C9 | `tap` / `begin_stroke` / `pick_color` 的座標單位是**螢幕像素**，不是 UIKit point——乘 `contentsScale` 是 Bridge 的責任（`specs/E1-bucket.md §4.1`） |
-| C10 | `InputSample.radius == 0` 表示**觸控筆**、`> 0` 表示手指（`specs/E1-stroke.md §2.2`）。Pencil 的 `majorRadius` 也有值，所以那個 0 是 Bridge **主動寫入的語意**，不是缺值 |
-| C11 | `InputSample.t` 相對**筆畫起點**歸零，單位秒。`UITouch.timestamp` 是 `systemUptime`，直接送 `f32` 只剩 0.03 秒解析度，One-Euro 的 `dt` 會爛掉（`specs/E1-input.md §4.1`） |
-| C12 | `InputSample.radius` 的單位是**點**，不是螢幕像素——這是 C9 的記名例外。`R_EPS = 4.0`（點）是絕對量，換單位不會被自適應正規化約掉（`specs/E1-stroke.md §5`） |
+| C9 | `tap` / `begin_stroke` / `pick_color` 的座標單位是**螢幕像素**，不是 UIKit point——乘 `contentsScale` 是 Bridge 的責任 |
+| C10 | `InputSample.radius == 0` 表示**觸控筆**、`> 0` 表示手指。Pencil 的 `majorRadius` 也有值，所以那個 0 是 Bridge **主動寫入的語意**，不是缺值 |
+| C11 | `InputSample.t` 相對**筆畫起點**歸零，單位秒。`UITouch.timestamp` 是 `systemUptime`，直接送 `f32` 只剩 0.03 秒解析度，One-Euro 的 `dt` 會爛掉 |
+| C12 | `InputSample.radius` 的單位是**點**，不是螢幕像素——這是 C9 的記名例外。`R_EPS = 4.0`（點）是絕對量，換單位不會被自適應正規化約掉 |
 | C13 | `set_mask_mode` 是**排定要移除的方法**，不是 v0 表面的一部分——Shell 不得依賴它。D4 拍板寫回 `prd.md §4.1` 之後，移除它**不算 major bump** |
 
 C8 的兩個後果，Bridge 必須知道：

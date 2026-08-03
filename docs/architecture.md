@@ -239,11 +239,11 @@ color-it/
 | colorpack 解碼暫存 | 約 16 MB |
 | **峰值預算** | **約 145 MB ＋ 上面兩列** |
 
-> **swapchain 與 `region_ids` 兩列是 2026-08-03 補的**（`specs/E1-wgpu.md §4.2`）：
+> **swapchain 與 `region_ids` 兩列是 2026-08-03 補的**：
 > 前者是螢幕解析度 × `Bgra8` × `maximumDrawableCount`，後者是常駐副本而非解碼暫存
 > （`§5.1`：油漆桶要**同步**拿到 region ID，單像素 readback 至少一 frame stall）。
 > 兩筆合計約佔原預算的 22–30%，而原表完全沒列。
-> **數字由 E1 的實機量測回填**（`specs/E1-perf.md §4` 的三步對帳），在那之前不改
+> **數字由 E1 的實機量測回填**（`perf-baseline.md`「對帳」的三步），在那之前不改
 > 「約 145 MB」這個結論——拿估算值改預算表等於用猜的數字做 D4 判定。
 
 **Undo pool 必須有記憶體上限。** 一筆畫可能碰到 4–16 個 256×256 tile（RGBA8 每 tile 256KB），即 1–4MB／步。若不設限，20 步就可能吃掉 80MB，而使用者可以連續畫數百筆。
@@ -379,7 +379,11 @@ color      = color * textureSample(T_line,  canvas_uv);    // Multiply，線稿�
 （`Buf_palette` 的 `a == 0` 才是「未填色」的表示）。
 
 **全部在 sRGB 編碼值上合成，不 linearize。** 決定性理由是畫布必須跟 baker 的
-`thumb.jpg` 長一樣，而那是 u8 整數乘法算的。完整論證見 `specs/E1-composite.md §2`。
+`thumb.jpg` 長一樣，而那是 u8 整數乘法（`compose.rs::over_white` 的 alpha 合成也在編碼值上做）。
+若 runtime 在 linear 空間合成，同一張圖在 Gallery 與 Canvas 會是兩個顏色。物理上 linear 才對，
+但這個約束更強，加上 `T_line` 的抗鋸齒灰階本來就是繪師的工具在 sRGB 空間 rasterize 的。三個佐證：
+(1) baker 已定死且有測試守住；(2) 繪師的建議色是 sRGB 工具產出的；(3) 在 linear 空間相乘不會還原
+繪師看到的邊緣。**代價（已接受）**：軟筆刷的 coverage 在 gamma 空間混合，邊緣比 linear 略「薄」。
 
 **`T_shade` 是選配**：沒有 shade 的文件綁定一張 1×1 的白色 dummy texture，不做 shader variant。多一個 pipeline 變體換不到任何效能。
 
@@ -461,11 +465,11 @@ let base = mix(f.prev_color, palette[id], t);    // 併進 composite 第 ① 層
 
 **`prev_color`（這次填色之前該區域的顏色）是必要欄位。** 沒有它，重複填同一區時
 動畫的起點無從得知——只能從新顏色跳變，或錯誤地從白紙淡入。有了它，「從未填色 /
-首次填色 / 重新填色」三種情況用同一條式子涵蓋（`specs/E1-composite.md §5`）。
+首次填色 / 重新填色」三種情況用同一條式子涵蓋（`§4.5` 的 `mix(prev_color, palette[id], t)`）。
 
-**`max_radius` 是 per-tap 的，不是 per-region 的。** `fill_origin` 是點擊處，所以「離 origin 最遠的距離」隨每次點擊而變。取 **origin 到 bbox 四個角的最大距離**——bbox 對角線在 origin 靠近某個角落時不夠大，動畫會在覆蓋對角另一端之前就結束，視覺上是「填到一半就停了」（`specs/E1-bucket.md §7.4`）。
+**`max_radius` 是 per-tap 的，不是 per-region 的。** `fill_origin` 是點擊處，所以「離 origin 最遠的距離」隨每次點擊而變。取 **origin 到 bbox 四個角的最大距離**——bbox 對角線在 origin 靠近某個角落時不夠大，動畫會在覆蓋對角另一端之前就結束，視覺上是「填到一半就停了」。
 
-**動畫曲線與時長**：ease-out cubic `p = 1 - (1 - t)³`，**180 ms**（初值，實機調校列入 `specs/E1-perf.md`）。CPU 每 frame 只推進進行中的 entry，`p` 到 1 之後停止寫入。
+**動畫曲線與時長**：ease-out cubic `p = 1 - (1 - t)³`，**180 ms**（初值，實機調校列入 `perf-baseline.md` 調校記錄）。CPU 每 frame 只推進進行中的 entry，`p` 到 1 之後停止寫入。
 
 > **已知的視覺限制**：對細長區域（葉子、花瓣、緞帶），從點擊處做圓形擴散會有明顯的「追趕感」——最遠的角落最後才填到。真正的解法是沿區域內測地距離擴散，成本高一個量級。**先做圓形近似，在 E1 實機看過再決定是否值得。**
 
@@ -500,7 +504,7 @@ pub struct BrushPreset {
 | 噴槍 | 大軟圓 | 0.02 | Normal | **true** | 0 |
 | 水彩 | 軟圓 | 0.06 | Multiply | **true** | **> 0**（初值待 E2 調校） |
 
-`Curve` 是三個參數、無編輯器、完全決定性（定義出處 `E1-stroke.md §6`）：
+`Curve` 是三個參數、無編輯器、完全決定性（`core/stroke` 的 `Curve`，§5.3）：
 
 ```rust
 pub struct Curve { pub min: f32, pub max: f32, pub gamma: f32 }
@@ -529,7 +533,7 @@ pub struct Curve { pub min: f32, pub max: f32, pub gamma: f32 }
 
 **產品需求**：Gallery 的進度環與完成建議，定義見 `prd.md §5.2`——已上色區域數 ÷ 總區域數，「已上色」＝ 油漆桶填過 **或** 該區域筆刷覆蓋率 > 50%。
 
-油漆桶的部分是 CPU 側資料（`palette`），直接數即可，零成本。**這個數的真相在 `document.colored_regions()`**——`engine` 把它投影進 `AppState`，`app-state` 不自己遞增（`specs/E1-bucket.md §2`）。**筆刷的部分需要 per-region 覆蓋率統計**：
+油漆桶的部分是 CPU 側資料（`palette`），直接數即可，零成本。**這個數的真相在 `document.colored_regions()`**——`engine` 把它投影進 `AppState`，`app-state` 不自己遞增（`core/document` 的 `Op`／`Effect`，§5.3）。**筆刷的部分需要 per-region 覆蓋率統計**：
 
 ```wgsl
 // compute shader，每個 workgroup 處理一塊 tile
@@ -606,7 +610,7 @@ pub fn generate_dabs(
     samples: &[InputSample],
     preset: &BrushPreset,
     size: f32,          // 筆刷直徑 px（Tool::Brush.size）。沒有它，弧長門檻
-    seed: u32,          // spacing × dab_size 算不出 px（E1-stroke.md §14 決議 E）
+    seed: u32,          // spacing × dab_size 算不出 px，所以 seed 是必要參數
 ) -> Vec<Dab>;
 
 pub struct InputSample {
@@ -640,7 +644,7 @@ pub struct Dab {
 ```
 
 **向心**（`alpha = 0.5`）不是均勻參數化：均勻版在樣本間距差異大時會 overshoot 與打結，
-手指快速轉向時必然發生（`E1-stroke.md §4.2`）。
+手指快速轉向時必然發生（`core/stroke` 的 `generate_dabs` 用 One-Euro 的過濾輸出當插值輸入，§4.2）。
 
 One-Euro filter **位置與 radius 各一組參數**，都需實機調校：太強會有「拖尾感」，太弱會有抖動。
 
@@ -1356,7 +1360,7 @@ App Shell 只依賴 `EngineProtocol`。引擎完成後把 `MockEngine` 換成 `R
 
 **正規化必須自適應。** `majorRadius` 的絕對值因手指大小而異，不能用固定的 min/max。以 per-stroke 的 running baseline 或使用者層級的長期基線做正規化，具體參數需實機調校（與 One-Euro filter 的參數一起，列在 E1）。
 
-E1 的落地版（`E1-stroke.md §5`、§14 決議 F）：
+E1 的落地版（`core/stroke` 的 `majorRadius` → pressure 自適應正規化）：
 
 ```
 pressure = clamp((r - r_min) / max(r_max - r_min, R_EPS), 0, 1)
@@ -1517,7 +1521,7 @@ v1 只生成 Swift；Kotlin 是加一行設定的事。
 | **motion-to-photon 延遲** | 高速攝影（240fps 以上）拍攝手指與螢幕，逐格計算 | 決定「跟手」的主觀感受，本產品最重要的單一指標 |
 | frame time 分佈 | 平台 profiler（Instruments / Perfetto），看 p99 而非平均 | 掉 frame 比平均慢更影響體感 |
 | **記憶體峰值** | 開啟 1:1 最大畫布 ＋ 連續塗抹 30 秒 ＋ undo pool 塞滿 | **對照 §4.1.1 的 145MB 預算**。超標則在 E1 就調整畫布解析度——此時繪師尚未量產，代價最低 |
-| ↑ **E1 的例外** | **E1 沒有 undo pool**，照原劇本量會得到一個好看但無意義的數字。E1 改用連填 20 個區域 ＋ 切出切回，並走 `specs/E1-perf.md §4` 的**三步對帳**（實測 → 回填 §4.1.1 缺的兩列 → 加上 E3 undo pool 估算再判定） | |
+| ↑ **E1 的例外** | **E1 沒有 undo pool**，照原劇本量會得到一個好看但無意義的數字。E1 改用連填 20 個區域 ＋ 切出切回，並走 `perf-baseline.md`「對帳」的**三步**（實測 → 回填 §4.1.1 缺的兩列 → 加上 E3 undo pool 估算再判定） | |
 | 首次可互動時間 | 從點擊線稿到可下筆 | 影響 Gallery → Canvas 的流暢感 |
 | `.colorpack` 大小 | baker 輸出統計 | 影響下載體驗與 R2 成本 |
 | Undo 提交延遲 | commit 到可再次下筆的間隔 | GPU readback 若同步會造成頓挫 |

@@ -95,8 +95,8 @@ pub struct SurfaceHandle {
 但 `§5.1` 的依賴圖上沒有這條邊。
 
 **S0 不解這題**——headless mock 沒有東西消費 samples，S0 只定義 DTO、不寫這條轉換。
-處理方式與 `build-infra.md §2` 對 `document → history` 的處理一致：等 E1 真的要連時，
-「必須先改 `deps-policy.toml`」正是逼這個決策浮上檯面的機制。
+處理方式與 `xtask/deps-policy.toml` 對 `document → history` 的處理一致：等 E1 真的要連時，
+「必須先改 policy 檔」正是逼這個決策浮上檯面的機制。
 
 ## 3. 方法表
 
@@ -182,7 +182,7 @@ crate-type = ["lib", "staticlib", "cdylib"]
 workspace 內的測試。加 `uniffi`、`thiserror` 兩個外部依賴。
 
 **`deps-policy.toml` 不用改**——`uniffi` 不在 `banned-external`，一般外部依賴依
-`build-infra.md §3` 不需登記；內部依賴邊也不變。
+policy 規則不需登記；內部依賴邊也不變。
 
 ### 模組佈局
 
@@ -421,7 +421,7 @@ targets = ["aarch64-apple-ios", "aarch64-apple-ios-sim"]
 ```
 
 代價是 Linux CI 也會裝兩份用不到的 std（幾十 MB）。換來本機少一個「沒寫在任何地方的
-前置步驟」——`build-infra.md §6` 已把 toolchain 的 SSOT 定在這個檔案。
+前置步驟」——toolchain 的 SSOT 已定在 `rust-toolchain.toml`。
 
 ### 產物佈局
 
@@ -531,9 +531,9 @@ S0 收尾時必須完成，對應驗收「本里程碑期間改變的決策已�
 | `architecture.md §6` | 三處修正（第 3 節）；加註「當前實際簽章見 `docs/contracts.md`；不一致時以 `core/engine` 為準」；`pick_color` 的同步／async 張力 |
 | `architecture.md §7` | CI 守門：`Generated/` diff → `ffi-lock.toml` 指紋比對 |
 | `architecture.md §10.1` | Swift protocol 對齊新簽章（歸 iOS 那份 spec，此處只標記相依） |
-| `specs/build-infra.md §4` | xtask 指令表：`ios`／`verify-generated` 狀態改為已實作 |
-| `specs/build-infra.md §6` | `rust-toolchain.toml` 加 `targets` |
-| `specs/build-infra.md §2` | `engine → stroke` 的懸而未決，與 `document → history` 並列 |
+| `architecture.md §12.1` | xtask 指令表：`ios`／`verify-generated` 狀態改為已實作 |
+| `rust-toolchain.toml` | 加 `targets = ["aarch64-apple-ios", "aarch64-apple-ios-sim"]` |
+| `xtask/deps-policy.toml` | `engine → stroke` 的懸而未決，與 `document → history` 並列 |
 | `docs/README.md` | 文件地圖加一列本規格 |
 | `CLAUDE.md` | 「當前」推進到 S0 |
 | `CHANGELOG.md` | 本里程碑條目 |

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
    必須是 **shared** scheme（放 xcshareddata/），不是 xcuserdata/ 裡的那種。
-   `xcuserdata/` 已 gitignore（specs/ios-scaffold.md §2），而 CI 的
+   `xcuserdata/` 已 gitignore，而 CI 的
    `xcodebuild -scheme ColorApp` 只讀得到 shared scheme——放錯地方 CI 會找不到 scheme。
 -->
 <Scheme
@@ -68,7 +68,7 @@
       <CommandLineArguments>
          <!--
             「換引擎 Shell 零修改」的可執行證明：勾起來就走真的 FFI，
-            Shell 程式碼一行不改（specs/ios-scaffold.md §6）。預設關閉。
+            Shell 程式碼一行不改。預設關閉。
          -->
          <CommandLineArgument
             argument = "-engine rust"

@@ -2,7 +2,7 @@
 //  EngineBridgeTests.swift
 //  EngineBridgeTests
 //
-//  `specs/ios-scaffold.md §8` 的六條。前四條驗「接得起來」，第五條驗「換得掉」——
+//  六條測試的編排見 apps/ios/README.md「跑測試」。前四條驗「接得起來」，第五條驗「換得掉」——
 //  它是唯一防止 `MockEngine` 慢慢漂離 Rust 行為的機制。
 //
 

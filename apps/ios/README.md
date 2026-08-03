@@ -1,6 +1,24 @@
 # apps/ios
 
-Colorlull 的 iOS app。規格見 `docs/specs/ios-scaffold.md`。
+Colorlull 的 iOS app。Xcode 骨架（S0）已完工，專案決策與陷阱記錄在本檔；
+`ColorApp.xcodeproj` 是唯一手工維護的 Xcode 檔。
+
+## 既有決策（S0 定案，改動要小心）
+
+- **引擎選擇在 `EngineBridge.EngineFactory`**，不在 `ColorApp.swift`——`cargo xtask lint-ios`
+  是純文字檢查「`apps/ios/ColorApp/**` 不得出現 `RustEngine`」，Shell 連「有一個 Rust 實作」
+  都不需要知道
+- **scheme 是 shared**（`xcshareddata/xcschemes/ColorApp.xcscheme`）：`xcodebuild -scheme`
+  讀不到 `xcuserdata/` 裡的 scheme，而 `xcuserdata/` 已 gitignore
+- **`EngineBridge` target 設 `SWIFT_DEFAULT_ACTOR_ISOLATION = nonisolated`**（Xcode 26 模板預設
+  `MainActor`，但生成的 `colorlull_engine.swift` 是為 nonisolated 寫的）；Shell 維持 `MainActor`
+- **`EXCLUDED_ARCHS[sdk=iphonesimulator*] = x86_64`**：xcframework 只有兩片 arm64
+  （`xtask/src/ios.rs` 的 `IOS_TARGETS`）
+- **`ENABLE_USER_SCRIPT_SANDBOXING = NO`**，且守門腳本只擋得住一半（見下方「前置步驟」）
+- **bundle id `underdog-ai.colorlull`**；模板帶的 macOS／visionOS 設定已全部收掉——v1 只有 iOS。
+  CI 加 `CODE_SIGNING_ALLOWED=NO`（runner 沒有憑證）
+- 依賴鏈：`ColorApp` → `EngineBridge.framework` → `ColorlullEngine.xcframework`（link 不 embed）。
+  每個 target 一個資料夾，file-system synchronized group（Xcode 16+），新增 Swift 檔不動 pbxproj
 
 ## 前置步驟：先跑一次 `cargo xtask ios`
 
@@ -27,7 +45,7 @@ ColorApp/Resources/dev.colorpack         ← 開發用資產（順便 bake，見
 | 整個 `Generated/` | Xcode 自己：`There is no XCFramework found at .../Generated/ColorlullEngine.xcframework` |
 | 只少 `Generated/Sources/` | `EngineBridge` 的「Generated/ 前置檢查」腳本，訊息直接叫你跑 `cargo xtask ios` |
 
-**bootstrap 不代跑 cargo**（`specs/ios-scaffold.md §2`）：自動跑 `cargo xtask ios` 會讓每次
+**bootstrap 不代跑 cargo**：自動跑 `cargo xtask ios` 會讓每次
 Xcode build 都可能變成一趟 release 編譯，build 時間不可預測。CI 上 `cargo xtask ios` 本來就
 排在 `xcodebuild` 前面，天然滿足。
 
@@ -65,7 +83,7 @@ cargo xtask dev-pack assets/source/torture-01
 沒 bake 就開 `-engine rust`，`EngineFactory` 的 `assertionFailure` 會直接說。
 
 **必須用真機。** `attach_surface` 要一個真的 `CAMetalLayer`；模擬器上 surface 建不起來，
-畫面會停在錯誤態（不 crash，這是 `E1-input §8` 的設計）。
+畫面會停在錯誤態（不 crash，這是 `contracts.md` C5 的設計）。
 
 畫布下方那排工具／色票是 **Debug 建置限定的 E1 測試 harness**，不是產品 UI——
 `CanvasScreen.DebugToolBar`。沒有它就切不到油漆桶（`touchesBegan` 要 `state.tool`
