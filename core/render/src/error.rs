@@ -20,6 +20,11 @@ pub enum RenderError {
     #[error("建不出 surface：{0}")]
     CreateSurface(wgpu::CreateSurfaceError),
 
+    /// `SurfaceHandle` 一定是 `CAMetalLayer`，非 Apple 平台沒有這條路徑。
+    /// 只為了讓 CI 的 Linux job 編得過而存在（`attach_surface` 在該平台永遠回這個）。
+    #[error("此平台不支援 attach_surface（只有 Apple 平台有 CAMetalLayer）")]
+    UnsupportedPlatform,
+
     #[error("解不開資產包裡的 PNG：{0}")]
     Png(#[from] png::DecodingError),
 

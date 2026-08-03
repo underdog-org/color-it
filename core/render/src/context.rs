@@ -119,11 +119,7 @@ impl RenderContext {
         handle: SurfaceHandle,
         pack: &ColorPack,
     ) -> Result<(), RenderError> {
-        let target = wgpu::SurfaceTargetUnsafe::CoreAnimationLayer(
-            handle.layer_ptr as *mut std::ffi::c_void,
-        );
-        let surface = unsafe { self.instance.create_surface_unsafe(target) }
-            .map_err(RenderError::CreateSurface)?;
+        let surface = unsafe { self.create_metal_surface(&handle) }?;
 
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
@@ -145,6 +141,37 @@ impl RenderContext {
         self.prepare_document(pack)?;
         self.configure();
         Ok(())
+    }
+
+    /// `SurfaceTargetUnsafe::CoreAnimationLayer` 是 wgpu 的 `#[cfg(metal)]` variant，
+    /// 非 Apple 平台上根本不存在。CI 的 rust job 跑在 Linux（`cargo build --workspace`），
+    /// 所以這條路徑必須 cfg 分岔，否則整個 workspace 編不過。
+    ///
+    /// # Safety
+    ///
+    /// 同 [`RenderContext::attach_surface`]：`handle.layer_ptr` 必須是活著的 `CAMetalLayer`。
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    unsafe fn create_metal_surface(
+        &self,
+        handle: &SurfaceHandle,
+    ) -> Result<wgpu::Surface<'static>, RenderError> {
+        let target = wgpu::SurfaceTargetUnsafe::CoreAnimationLayer(
+            handle.layer_ptr as *mut std::ffi::c_void,
+        );
+        unsafe { self.instance.create_surface_unsafe(target) }.map_err(RenderError::CreateSurface)
+    }
+
+    /// 非 Apple 平台只為了編得過而存在——`render` 的其餘部分（含 golden test）仍照常在 CI 上跑。
+    ///
+    /// # Safety
+    ///
+    /// 沒有安全需求，簽名只是為了與 Apple 版本一致。
+    #[cfg(not(any(target_os = "macos", target_os = "ios")))]
+    unsafe fn create_metal_surface(
+        &self,
+        _handle: &SurfaceHandle,
+    ) -> Result<wgpu::Surface<'static>, RenderError> {
+        Err(RenderError::UnsupportedPlatform)
     }
 
     /// 只重設 surface configuration——畫布尺寸來自 `manifest.canvas_size`，與螢幕無關。

@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+**修正（E1）**
+- `RenderContext::attach_surface` 建 surface 的那一段抽成 cfg 分岔的 `create_metal_surface`：`SurfaceTargetUnsafe::CoreAnimationLayer` 是 wgpu 的 `#[cfg(metal)]` variant，非 Apple 平台不存在，CI 的 Linux job 因此整個 workspace 編不過。非 Apple 版本回新的 `RenderError::UnsupportedPlatform`。注意 metal 那一支在 CI 上沒有任何 job 會編到（`ios` job 的 paths-filter 不含 `core/render/**`）
+
 **真機測試 harness（E1）**
 - `cargo xtask dev-pack [DIR]`：bake 一顆 pack 進 `apps/ios/ColorApp/Resources/dev.colorpack`（預設素材 `kirby-demo-1`），並掛進 `cargo xtask ios`——忘記跑的懲罰是 App 靜默退回 `MockEngine`，那個症狀要花很久才認得出來。產物 gitignore，與 `assets/packs/` 同一條規則
 - `ColorApp.swift` 的 pack 路徑從 S0 遺留的 `mock-lineart.png` 改成 `dev.colorpack`——E1 起 `Engine::new` 真的解析格式，PNG 一定被 reject
