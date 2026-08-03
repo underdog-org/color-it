@@ -2,6 +2,8 @@
 
 use std::collections::HashMap;
 
+use crate::seeds::Seed;
+
 pub const MAX_UNIQUE_COLORS: usize = 1024;
 pub const MIN_COLOR_AREA: u32 = 100;
 
@@ -158,9 +160,125 @@ pub fn count_components_per_id(ids: &[u32], width: u32, height: u32, count: u32)
     pieces
 }
 
+/// `labels` 裡代表「還沒有 region id」的值。
+pub const UNASSIGNED: u32 = u32::MAX;
+
+#[derive(Debug, Clone)]
+pub struct Grown {
+    /// 每像素的 region id，`UNASSIGNED` 表示未指派。索引即 seed 在輸入切片的位置。
+    pub labels: Vec<u32>,
+    /// `(先佔住該封閉區的 seed id, 撞進來的 seed id)`。線稿有缺口的證據。
+    pub collisions: Vec<(u32, u32)>,
+    /// anchor 落在線像素上的 seed id。
+    pub on_line: Vec<u32>,
+}
+
+/// 逐 seed 4-連通 flood fill，只走非線像素。
+///
+/// 用逐 seed 而非多源同步 BFS：線稿封閉時兩者等價，不封閉時只有逐 seed
+/// 能指出「哪兩個 seed 連在一起」。同步 BFS 會在中間切一條任意分界線然後
+/// 靜默通過——那正是要避免的失敗模式（`baker-seeds §3.1 ①`）。
+pub fn grow(seeds: &[Seed], line: &[bool], width: u32, height: u32) -> Grown {
+    let (w, h) = (width as usize, height as usize);
+    let mut labels = vec![UNASSIGNED; w * h];
+    let mut collisions = Vec::new();
+    let mut on_line = Vec::new();
+    let mut stack: Vec<usize> = Vec::new();
+
+    for (id, s) in seeds.iter().enumerate() {
+        let id = id as u32;
+        let start = s.anchor.1 as usize * w + s.anchor.0 as usize;
+        if line[start] {
+            on_line.push(id);
+            continue;
+        }
+        if labels[start] != UNASSIGNED {
+            collisions.push((labels[start], id));
+            continue;
+        }
+
+        labels[start] = id;
+        stack.push(start);
+        while let Some(p) = stack.pop() {
+            let (x, y) = (p % w, p / w);
+            let mut visit = |n: usize, stack: &mut Vec<usize>| {
+                if !line[n] && labels[n] == UNASSIGNED {
+                    labels[n] = id;
+                    stack.push(n);
+                }
+            };
+            if x > 0 {
+                visit(p - 1, &mut stack);
+            }
+            if x + 1 < w {
+                visit(p + 1, &mut stack);
+            }
+            if y > 0 {
+                visit(p - w, &mut stack);
+            }
+            if y + 1 < h {
+                visit(p + w, &mut stack);
+            }
+        }
+    }
+
+    Grown {
+        labels,
+        collisions,
+        on_line,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::seeds::Seed;
+
+    fn seed(x: u32, y: u32) -> Seed {
+        Seed {
+            anchor: (x, y),
+            color: [0, 0, 0],
+            solid_area: 100,
+        }
+    }
+
+    /// 一條垂直線把 3x1 切成左右兩半，兩個 seed 各自佔一半。
+    #[test]
+    fn two_seeds_separated_by_a_line_get_their_own_regions() {
+        let line = vec![false, true, false];
+        let g = grow(&[seed(0, 0), seed(2, 0)], &line, 3, 1);
+        assert_eq!(g.labels, vec![0, UNASSIGNED, 1]);
+        assert!(g.collisions.is_empty());
+        assert!(g.on_line.is_empty());
+    }
+
+    /// **線稿缺口的症狀**：線沒把兩邊隔開，第二個 seed 撞進第一個的區域。
+    /// 必須報 collision 而不是靜默切一條分界線——那是繪師唯一需要知道的事。
+    #[test]
+    fn a_gap_in_the_line_is_reported_as_a_collision() {
+        let line = vec![false, false, false];
+        let g = grow(&[seed(0, 0), seed(2, 0)], &line, 3, 1);
+        assert_eq!(g.collisions, vec![(0, 1)], "先佔住的是 seed 0");
+        assert_eq!(g.labels, vec![0, 0, 0], "整條仍歸 seed 0，preview 才畫得出來");
+    }
+
+    /// anchor 落在線上 → flood fill 起不來，回報而非 panic。
+    #[test]
+    fn a_seed_sitting_on_the_line_is_reported_and_skipped() {
+        let line = vec![false, true, false];
+        let g = grow(&[seed(1, 0)], &line, 3, 1);
+        assert_eq!(g.on_line, vec![0]);
+        assert!(g.labels.iter().all(|&v| v == UNASSIGNED));
+    }
+
+    /// 沒有 seed 的封閉區維持未指派——`find_orphans` 之後才判定它是不是漏點。
+    #[test]
+    fn a_closed_area_with_no_seed_stays_unassigned() {
+        // 5x1：左半有 seed，右半被線隔開且沒有 seed
+        let line = vec![false, false, true, false, false];
+        let g = grow(&[seed(0, 0)], &line, 5, 1);
+        assert_eq!(g.labels, vec![0, 0, UNASSIGNED, UNASSIGNED, UNASSIGNED]);
+    }
 
     fn rgba(pixels: &[[u8; 3]]) -> Vec<u8> {
         pixels
