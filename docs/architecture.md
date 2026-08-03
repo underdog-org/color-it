@@ -1382,7 +1382,7 @@ R_EPS = 4.0（點），實機調校
 
 渲染由 FrameDriver 驅動，**不由輸入事件驅動**。輸入事件只累積 sample，`render()` 每 frame 呼叫一次。
 
-> **定案（E1）：`CAMetalLayer` ＋ 自建 `CADisplayLink`。`MTKView` 是退路。** 理由與退路的觸發條件見 `E1-input.md §1`——`MTKView` 自帶一套 draw loop，與上一段是競爭機制。落地細節（runloop mode `.common`、`preferredFrameRateRange`、weak proxy）在 `E1-input.md §2`。
+> **定案（E1）：`CAMetalLayer` ＋ 自建 `CADisplayLink`。`MTKView` 是退路。** 理由是 `MTKView` 自帶一套 draw loop，與上一段的「渲染不由輸入驅動」是競爭機制。落地細節：runloop mode 用 `.common`（否則捲動時停拍）、`preferredFrameRateRange` 設 ProMotion、target 用 weak proxy（`CADisplayLink` 會強持有 target，直接傳 `self` 則 view 永不釋放）。實作見 `apps/ios/EngineBridge/FrameDriver.swift`。
 
 ---
 

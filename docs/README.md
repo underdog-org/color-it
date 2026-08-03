@@ -15,6 +15,7 @@
 | [specs/baker-core-design.md](./specs/baker-core-design.md) | **`tools/baker` ＋ `core/colorpack` 的 SSOT**：色標交付管線、`.colorpack` 容器、檢查清冊、測試（**已實作**） | 長 |
 | [specs/naming.md](./specs/naming.md) | 產品名稱決策記錄（為何不叫 Color It）＋ 上架前必補的查證項 | 短 |
 | [specs/ffi-contract.md](./specs/ffi-contract.md) | uniffi 型別與方法表、headless mock、`xtask ios`（S0 Rust 契約**設計**） | 509 行 |
+| [specs/E2-spec-plan.md](./specs/E2-spec-plan.md) | E2 四份 spec 的拆分依據與撰寫契約（**里程碑期間有效，收尾後刪除**） | 220 行 |
 | [perf-baseline.md](./perf-baseline.md) | **效能量測方法 ＋ 實測數字**：m2p 流程、對帳、D2／D3／D4 劇本、調校記錄 | 短 |
 | [contracts.md](./contracts.md) | FFI 的**現況**：表面速查表、語意條款 C1–C13、semver 判定、遷移記錄 | 短 |
 
@@ -66,6 +67,11 @@
 E1 期把渲染、筆刷、油漆桶、輸入定案為六份 spec；里程碑收尾時決策已回寫進 `architecture.md` 與
 `contracts.md`，spec 已刪除。現在查這幾塊的設計 → `architecture.md §4`／`§5`／`§10` 與 `contracts.md`
 語意條款；某個參數是量出來的還是猜的 → `perf-baseline.md` 調校記錄。
+
+> **原始碼註解裡還有約 150 處 `E1-*.md §N` 引用。** 那六份 ＋ 拆分計畫的原文在 git 歷史，
+> 取用：`git show 8089d0e:docs/specs/E1-stroke.md`（其餘同理）。**這些引用是待清理的債**——
+> 正確做法是把被引用的那句理由就地寫進註解，而不是改指 `architecture.md §N`（章節號一樣會漂）。
+> 新寫的 spec 不得再被原始碼註解引用，見 `specs/E2-spec-plan.md`「撰寫約束」。
 
 ### 排程面（roadmap/）
 
