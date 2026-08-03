@@ -9,12 +9,7 @@ use baker::image::{Image, PngOptions, encode_rgba};
 use baker::seeds::Seed;
 use baker::segment::{self, UNASSIGNED};
 
-/// 與 `baker-seeds.md §3.3` 同值。低於此面積的自由區在 Phase 1 會併入鄰居（§3.1 ④），
-/// 所以這裡也不給它色標——它們該出現在 orphan 普查裡，不該算成一個區。
 const MIN_ORPHAN_AREA: u32 = 500;
-
-/// reference 的顏色量化格數（每通道 5 bits）。要夠粗才不會被漸層與抗鋸齒切碎，
-/// 又要夠細才分得出「膚色 vs 頭髮」這種相鄰色。
 const QUANT_SHIFT: u8 = 3;
 
 /// 第二眾數要佔封閉區的多少面積，才算「這裡本來想分兩塊」。
@@ -114,6 +109,45 @@ fn main() -> Result<()> {
     }
     if under.len() > 20 {
         println!("  …另有 {} 個未列出", under.len() - 20);
+    }
+    // 判準沒命中時，光憑「0 個」看不出是線稿真的封閉、還是量測根本沒在動。
+    // 把最接近門檻的十個攤開來，讓 0 這個數字可稽核。
+    let mut ranked: Vec<&RegionModes> = modes.iter().collect();
+    ranked.sort_by(|a, b| {
+        let score = |m: &RegionModes| m.second_share * m.distance();
+        score(b).total_cmp(&score(a))
+    });
+    println!("最接近雙峰的 10 個封閉區（門檻 share≥{BIMODAL_SHARE} 且 Δ≥{BIMODAL_DISTANCE}）：");
+    for m in ranked.iter().take(10) {
+        println!(
+            "  {:>8} px @{:?}  {:?} {:.0}% ／ {:?} {:.0}%  Δ{:.0}",
+            census.areas[m.id as usize],
+            census.anchors[m.id as usize],
+            m.first,
+            m.first_share * 100.0,
+            m.second,
+            m.second_share * 100.0,
+            m.distance()
+        );
+    }
+
+    // 線稿比 reference 細多少：同一個建議色被幾個封閉區共用。
+    // 這個倍率就是 B 案下繪師「除了一色一點之外還要多點幾下」的成本。
+    let mut per_color: HashMap<[u8; 3], u32> = HashMap::new();
+    for m in &modes {
+        *per_color.entry(m.first).or_default() += 1;
+    }
+    let mut shared: Vec<(&[u8; 3], &u32)> = per_color.iter().collect();
+    shared.sort_by_key(|&(c, n)| (std::cmp::Reverse(*n), *c));
+    println!(
+        "\n建議色種類：{}，封閉區 {} 個 → 平均一色 {:.1} 區",
+        per_color.len(),
+        big.len(),
+        big.len() as f32 / per_color.len().max(1) as f32
+    );
+    println!("被最多封閉區共用的建議色：");
+    for (c, n) in shared.iter().take(5) {
+        println!("  {c:?} × {n} 區");
     }
 
     // ── §3 管線實跑：每個 ≥門檻封閉區放一個色標 ────────────────────
