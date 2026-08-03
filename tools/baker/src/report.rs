@@ -2,6 +2,7 @@
 //!
 //! 文字輸出與 `--report x.json` 從同一個 `Vec<Diagnostic>` 渲染，不是兩份真相。
 
+use std::cmp::Reverse;
 use std::fmt::Write as _;
 
 use serde::Serialize;
@@ -33,8 +34,63 @@ pub mod code {
     pub const REGION_SPLIT: &str = "region-split";
 }
 
-/// 一張全錯的圖不該吐四百萬行。
+/// 一張全錯的圖不該吐四百萬行。聚類之後這是**叢集**數上限，不是座標數上限。
 pub const MAX_COORDS: usize = 16;
+
+/// 座標聚類的格寬（母帶像素，§5）。同一格內的座標視為「同一處」。
+///
+/// 128px 是繪師在 CSP 裡縮到全圖時大約一個筆刷點的尺度：報 16 個散落座標他要
+/// 逐一跳過去看，報「(1204,880) 附近 500 處」他一眼知道那是同一個地方的同一件事。
+///
+/// 取整分格不是真的連通分量：橫跨格線的一片問題會報成相鄰的兩處。這是刻意的
+/// ——真連通分量要再掃一次整張圖，而「兩處在隔壁」對繪師的動作沒有差別。
+pub const CLUSTER_GRID: u32 = 128;
+
+/// 一處問題。`count` 是聚進這一叢的原始座標數。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct Coord {
+    pub x: u32,
+    pub y: u32,
+    pub count: usize,
+}
+
+/// 診斷之間的閱讀順序（§5「可疑度排序」）。**不是嚴重度順序**：
+/// `line-coverage` 是 Warning 卻排在所有色標錯誤前面——門檻判錯時，後面每一條
+/// 診斷都是它的衍生雜訊，先看它才不會白補 50 個點。
+const SUSPICION: [&str; 18] = [
+    code::SOURCE_INCOMPLETE,
+    code::SIZE_MISMATCH,
+    code::CANVAS_SIZE,
+    code::COLOR_SPACE,
+    code::META_ID_MISMATCH,
+    code::META_BAD_CATEGORY,
+    code::LINE_COVERAGE,
+    code::SEED_ON_LINE,
+    code::SEED_TOO_SMALL,
+    code::SEED_COLLISION,
+    code::ORPHAN_AREA,
+    code::SHADE_TOO_DARK,
+    code::REGION_COUNT_OVERFLOW,
+    code::REGION_COUNT_DRIFT,
+    code::REGION_SPLIT,
+    code::TINY_REGION,
+    code::REGION_COUNT_RANGE,
+    // 認不得的 code 排在最後。
+    "",
+];
+
+fn suspicion_rank(code: &str) -> usize {
+    SUSPICION
+        .iter()
+        .position(|&c| c == code)
+        .unwrap_or(SUSPICION.len())
+}
+
+/// 依「該先看哪個」重排。同一 code 之內的順序由各檢查自己決定（`orphan-area`
+/// 是面積遞減），這裡只排 code 與 code 之間。
+pub fn sort_by_suspicion(diagnostics: &mut [Diagnostic]) {
+    diagnostics.sort_by_key(|d| suspicion_rank(d.code));
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -56,10 +112,13 @@ pub struct Diagnostic {
     pub code: &'static str,
     pub stage: Stage,
     pub message: String,
-    /// **一律是母帶座標系**（繪師在 CSP 裡看到的那個）。輸出階段發現的問題已經 ×2 換算。
-    pub coords: Vec<(u32, u32)>,
-    /// 座標總數。`coords` 只留前 `MAX_COORDS` 個。
+    /// 聚類後的「處」，依叢集大小遞減。**一律是母帶座標系**（繪師在 CSP 裡看到的
+    /// 那個）。輸出階段發現的問題已經 ×2 換算。只留前 `MAX_COORDS` 叢。
+    pub coords: Vec<Coord>,
+    /// 聚類**前**的原始座標總數。
     pub coord_total: usize,
+    /// 聚類後的總叢集數。`coords.len()` 只是它的前 `MAX_COORDS` 個。
+    pub cluster_total: usize,
     pub region: Option<u32>,
 }
 
@@ -85,14 +144,26 @@ impl Diagnostic {
             message: message.into(),
             coords: Vec::new(),
             coord_total: 0,
+            cluster_total: 0,
             region: None,
         }
     }
 
     pub fn with_coords(mut self, coords: Coords) -> Self {
+        let mut clusters = coords.clusters;
+        // 大的一叢先看（§5）。stable sort：同大小時保留各檢查自己的排序，
+        // `orphan-area` 的面積遞減因此不會被打亂。
+        clusters.sort_by_key(|c| Reverse(c.count));
         self.coord_total = coords.total;
-        self.coords = coords.kept;
+        self.cluster_total = clusters.len();
+        clusters.truncate(MAX_COORDS);
+        self.coords = clusters;
         self
+    }
+
+    /// 叢集代表座標。測試與 `--debug-out` 用。
+    pub fn points(&self) -> Vec<(u32, u32)> {
+        self.coords.iter().map(|c| (c.x, c.y)).collect()
     }
 
     pub fn with_region(mut self, region: u32) -> Self {
@@ -101,35 +172,67 @@ impl Diagnostic {
     }
 }
 
-/// 收集座標並自動套用 `MAX_COORDS` 上限與換算。
+/// 收集座標，**邊收邊聚類**並自動換算回母帶座標系。
+///
+/// 聚類必須在 push 當下做，不能先收完再聚：`shade-too-dark` 最壞情況是整張 12.6M
+/// 個像素，全部留下來再聚類要 100MB。以 `CLUSTER_GRID` 格取整當 key 之後，叢集數
+/// 的上限是「畫布格數」（3072×4096 → 768），與問題像素數無關。
 #[derive(Debug, Default, Clone)]
 pub struct Coords {
-    kept: Vec<(u32, u32)>,
+    clusters: Vec<Coord>,
+    /// 格座標 → `clusters` 的索引。
+    index: std::collections::HashMap<(u32, u32), usize>,
     total: usize,
     /// 輸出階段收集時設 2：座標一律換算回母帶座標系（§4.2）。
     scale: u32,
+    /// 聚類格寬。**1 = 不聚類**，只去重完全相同的座標。
+    grid: u32,
 }
 
 impl Coords {
+    /// **不聚類**。座標本身就是可執行動作的那種診斷用它：色標的四條裡，
+    /// 每個 anchor 都是繪師要動手的一個點，兩個相距 20px 的色標是兩件事不是一件事。
+    /// `seed-collision` 更是絕對不能聚——聚掉就毀了「在這兩點之間補線」的語意。
     pub fn master() -> Self {
         Self {
             scale: 1,
+            grid: 1,
             ..Default::default()
         }
     }
 
-    /// 輸出解析度收集的座標，push 時自動 ×2 換算回母帶。
+    /// 聚類。座標是「症狀出現的地方」而非「要動手的地方」的診斷用它：
+    /// `shade-too-dark` 動輒上萬個像素，逐一列出對誰都沒用。
+    pub fn clustered() -> Self {
+        Self {
+            scale: 1,
+            grid: CLUSTER_GRID,
+            ..Default::default()
+        }
+    }
+
+    /// 輸出解析度收集的座標，push 時自動 ×2 換算回母帶。一律聚類——
+    /// 輸出階段的診斷（`tiny-region` 等）動輒上千個區域。
     pub fn output() -> Self {
         Self {
             scale: 2,
+            grid: CLUSTER_GRID,
             ..Default::default()
         }
     }
 
+    /// 叢集的代表座標是**第一個**落進該格的座標，不是格心——回報的座標必須是
+    /// 真的有問題的那個像素，繪師跳過去才看得到東西。
     pub fn push(&mut self, x: u32, y: u32) {
         self.total += 1;
-        if self.kept.len() < MAX_COORDS {
-            self.kept.push((x * self.scale, y * self.scale));
+        let (x, y) = (x * self.scale, y * self.scale);
+        let cell = (x / self.grid, y / self.grid);
+        match self.index.get(&cell) {
+            Some(&i) => self.clusters[i].count += 1,
+            None => {
+                self.index.insert(cell, self.clusters.len());
+                self.clusters.push(Coord { x, y, count: 1 });
+            }
         }
     }
 
@@ -220,10 +323,16 @@ impl Report {
                 let list: Vec<String> = d
                     .coords
                     .iter()
-                    .map(|(x, y)| format!("({x}, {y})"))
+                    .map(|c| {
+                        if c.count > 1 {
+                            format!("({}, {})×{}", c.x, c.y, c.count)
+                        } else {
+                            format!("({}, {})", c.x, c.y)
+                        }
+                    })
                     .collect();
-                let suffix = if d.coord_total > d.coords.len() {
-                    format!("，另有 {} 處", d.coord_total - d.coords.len())
+                let suffix = if d.cluster_total > d.coords.len() {
+                    format!("，另有 {} 處", d.cluster_total - d.coords.len())
                 } else {
                     String::new()
                 };
@@ -232,7 +341,13 @@ impl Report {
                 } else {
                     "（母帶座標）"
                 };
-                let _ = writeln!(out, "      {note} {}{suffix}", list.join(" "));
+                // 聚類過的才報「共 N px」——沒聚到東西時那個數字只是雜訊。
+                let scope = if d.coord_total > d.cluster_total {
+                    format!("{} 處／共 {} px", d.cluster_total, d.coord_total)
+                } else {
+                    format!("{} 處", d.cluster_total)
+                };
+                let _ = writeln!(out, "      {note} {scope}：{}{suffix}", list.join(" "));
             }
         }
         if let Some(s) = &self.seeds {
@@ -267,31 +382,96 @@ impl Report {
 mod tests {
     use super::*;
 
+    fn report_of(diagnostics: Vec<Diagnostic>) -> Report {
+        Report {
+            id: "x".into(),
+            source: "x".into(),
+            diagnostics,
+            seeds: None,
+            summary: None,
+        }
+    }
+
     #[test]
     fn output_coords_are_converted_back_to_master_space() {
         let mut coords = Coords::output();
         coords.push(10, 20);
         let d = Diagnostic::warning(code::TINY_REGION, Stage::Output, "x").with_coords(coords);
-        assert_eq!(d.coords, vec![(20, 40)]);
+        assert_eq!(d.points(), vec![(20, 40)]);
     }
 
+    /// 上限套在**叢集**上：100 個彼此隔開的問題點 → 100 叢，只留 16。
     #[test]
-    fn coords_are_capped_but_total_is_kept() {
+    fn clusters_are_capped_but_totals_are_kept() {
         let mut coords = Coords::master();
         for i in 0..100 {
-            coords.push(i, i);
+            coords.push(i * CLUSTER_GRID, 0);
         }
         let d = Diagnostic::error(code::ORPHAN_AREA, Stage::Master, "x").with_coords(coords);
         assert_eq!(d.coords.len(), MAX_COORDS);
-        assert_eq!(d.coord_total, 100);
-        let report = Report {
-            id: "x".into(),
-            source: "x".into(),
-            diagnostics: vec![d],
-            seeds: None,
-            summary: None,
-        };
-        assert!(report.to_text().contains("另有 84 處"));
+        assert_eq!((d.coord_total, d.cluster_total), (100, 100));
+        assert!(report_of(vec![d]).to_text().contains("另有 84 處"));
+    }
+
+    /// §5 座標聚類：擠在一起的座標算**一處**，不是 16 個散落座標。
+    /// 這是 `shade-too-dark` 動輒上萬個像素時，報告還讀得懂的唯一理由。
+    #[test]
+    fn neighbouring_coords_collapse_into_one_place() {
+        let mut coords = Coords::clustered();
+        // 全部壓在同一格內（1200/128 = 9、880/128 = 6）——跨格線的情形見
+        // `CLUSTER_GRID` 的說明，那會報成相鄰的兩處。
+        for i in 0..500 {
+            coords.push(1200 + i % 16, 880 + i % 16);
+        }
+        coords.push(3000, 100); // 遠處另一叢
+        let d = Diagnostic::error(code::SHADE_TOO_DARK, Stage::Master, "x").with_coords(coords);
+
+        assert_eq!(d.cluster_total, 2, "同一格內的 500 個座標是一處");
+        assert_eq!(d.coord_total, 501);
+        assert_eq!(d.coords[0].count, 500, "大的一叢排前面");
+        assert_eq!(
+            (d.coords[0].x, d.coords[0].y),
+            (1200, 880),
+            "代表座標取第一個落進該格的，不是格心"
+        );
+        let text = report_of(vec![d]).to_text();
+        assert!(text.contains("2 處／共 501 px"), "{text}");
+        assert!(text.contains("(1200, 880)×500"), "{text}");
+    }
+
+    /// §5 可疑度排序：`line-coverage` 是 Warning，卻要排在色標錯誤前面——
+    /// 二值化門檻不對時，後面每一條都是它的衍生雜訊。
+    #[test]
+    fn line_coverage_is_read_before_the_seed_errors_it_would_explain() {
+        let mut list = vec![
+            Diagnostic::error(code::ORPHAN_AREA, Stage::Master, "x"),
+            Diagnostic::error(code::SEED_ON_LINE, Stage::Master, "x"),
+            Diagnostic::warning(code::LINE_COVERAGE, Stage::Master, "x"),
+            Diagnostic::error(code::CANVAS_SIZE, Stage::Master, "x"),
+        ];
+        sort_by_suspicion(&mut list);
+        let codes: Vec<&str> = list.iter().map(|d| d.code).collect();
+        assert_eq!(
+            codes,
+            vec![
+                code::CANVAS_SIZE,
+                code::LINE_COVERAGE,
+                code::SEED_ON_LINE,
+                code::ORPHAN_AREA
+            ]
+        );
+    }
+
+    /// 排序是 stable 的：同一 code 之內的順序由各檢查自己決定
+    /// （`orphan-area` 是面積遞減），重排不得打亂它。
+    #[test]
+    fn sorting_keeps_the_order_within_a_code() {
+        let mut list = vec![
+            Diagnostic::error(code::ORPHAN_AREA, Stage::Master, "大"),
+            Diagnostic::error(code::ORPHAN_AREA, Stage::Master, "小"),
+        ];
+        sort_by_suspicion(&mut list);
+        assert_eq!(list[0].message, "大");
     }
 
     /// 色標統計一律列出——含被拒收的素材。「點了幾個點」是判讀 `orphan-area`

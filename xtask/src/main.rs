@@ -37,6 +37,9 @@ enum Command {
         /// 額外把報告寫成 JSON
         #[arg(long, value_name = "PATH")]
         report: Option<PathBuf>,
+        /// 產出退件附件到指定目錄（baker-seeds.md §5）
+        #[arg(long = "debug-out", value_name = "DIR")]
+        debug_out: Option<PathBuf>,
     },
     /// 過渡用：從舊契約的 reference.png 反推 seeds.png
     ///
@@ -57,7 +60,12 @@ fn main() -> Result<()> {
         Command::LintDeps => lint_deps(),
         Command::LintIos => lint_ios::run(&metadata::load()?.root),
         Command::GenTorture => gen_torture(),
-        Command::Bake { dir, out, report } => bake(&dir, out, report),
+        Command::Bake {
+            dir,
+            out,
+            report,
+            debug_out,
+        } => bake(&dir, out, report, debug_out),
         Command::SeedsFromReference { dir } => seeds_from_reference(&dir),
         Command::Ios => ios::run(&metadata::load()?),
         Command::VerifyGenerated => ios::verify_generated(&metadata::load()?),
@@ -116,13 +124,19 @@ fn seeds_from_reference(dir: &Path) -> Result<()> {
     Ok(())
 }
 
-fn bake(dir: &Path, out: Option<PathBuf>, report_json: Option<PathBuf>) -> Result<()> {
+fn bake(
+    dir: &Path,
+    out: Option<PathBuf>,
+    report_json: Option<PathBuf>,
+    debug_out: Option<PathBuf>,
+) -> Result<()> {
     let root = metadata::load()?.root;
     let opts = baker::BakeOptions {
         out_dir: out.unwrap_or_else(|| root.join("assets/packs")),
         report_json,
         // `cargo xtask bake` 一律走契約預設值；要調參數請直接跑 baker --set。
         params: baker::Params::default(),
+        debug_out,
     };
     let report = baker::bake(dir, &opts)?;
     print!("{}", report.to_text());

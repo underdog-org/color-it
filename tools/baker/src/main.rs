@@ -23,6 +23,10 @@ struct Cli {
     /// line_threshold / min_seed_area / min_orphan_area / max_line_ratio
     #[arg(long = "set", value_name = "KEY=VALUE")]
     set: Vec<String>,
+    /// 產出退件附件到指定目錄：preview.png / seeds-overlay.png /
+    /// reference-preview.png / regions.json（拒收時照樣產出）
+    #[arg(long = "debug-out", value_name = "DIR")]
+    debug_out: Option<PathBuf>,
 }
 
 fn main() -> ExitCode {
@@ -42,6 +46,7 @@ fn main() -> ExitCode {
         out_dir: cli.out,
         report_json: cli.report,
         params,
+        debug_out: cli.debug_out,
     };
     match baker::bake(&cli.src_dir, &opts) {
         Ok(report) => {

@@ -201,7 +201,7 @@ mod tests {
             .iter()
             .find(|d| d.code == code::REGION_COUNT_DRIFT)
             .unwrap();
-        assert!(d.coords.contains(&(1, 0)));
+        assert!(d.points().contains(&(1, 0)));
     }
 
     #[test]

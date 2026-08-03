@@ -52,7 +52,7 @@ impl Case {
             "{} 必須附座標——`assets-spec §7` 承諾退件附失敗座標",
             self.expect
         );
-        for coord in &diagnostic.coords {
+        for coord in &diagnostic.points() {
             assert!(
                 self.planted.contains(coord),
                 "{} 回報的座標 {coord:?} 不在植入點裡，失敗原因不是我們想測的那個。\n{}",

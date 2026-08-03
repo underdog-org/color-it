@@ -9,6 +9,7 @@
 pub mod binarize;
 pub mod check;
 pub mod compose;
+pub mod debug_out;
 pub mod dilate;
 pub mod image;
 pub mod migrate;
@@ -92,6 +93,8 @@ pub struct BakeOptions {
     pub out_dir: PathBuf,
     pub report_json: Option<PathBuf>,
     pub params: Params,
+    /// `--debug-out <dir>`：退件附件的輸出目錄（§5）。**拒收時照樣產出**。
+    pub debug_out: Option<PathBuf>,
 }
 
 impl BakeOptions {
@@ -100,6 +103,7 @@ impl BakeOptions {
             out_dir: out_dir.into(),
             report_json: None,
             params: Params::default(),
+            debug_out: None,
         }
     }
 }
@@ -187,6 +191,27 @@ pub fn bake(dir: &Path, opts: &BakeOptions) -> Result<Report> {
         diagnostics.extend(check::master::shade(shade_white, master_w));
     }
     drop(shade);
+
+    // 退件附件（§5）。**必須在 fail-fast 之前**——`seed-collision` 與 `orphan-area`
+    // 正是最需要附件的兩種退件，「因為有錯所以什麼都不給你」對繪師毫無用處。
+    // 此刻的 labels 還沒 close，線與孤兒區都是 UNASSIGNED，preview 靠這一點畫圖。
+    if let Some(dir) = &opts.debug_out {
+        debug_out::write(
+            dir,
+            &debug_out::DebugInput {
+                id: &src.folder_id,
+                width: master_w,
+                height: master_h,
+                labels: &grown.labels,
+                seeds: &seed_list,
+                line: &line,
+                lineart_white: &lineart_white,
+                shade_white: shade_white.as_deref(),
+                collisions: &grown.collisions,
+                orphans: &orphans,
+            },
+        )?;
+    }
 
     // 階段間 fail-fast：母帶有 Error 就不進降採樣。canvas-size 也在這裡被擋下，
     // 所以底下的 aspect 一定推得出來。
@@ -318,7 +343,10 @@ fn region_areas(labels: &[u32], count: usize) -> Vec<u32> {
     areas
 }
 
-fn finish(report: Report, opts: &BakeOptions) -> Result<Report> {
+/// 每一條 return 路徑都經過這裡，所以「該先看哪個」的排序放在這裡做一次就夠
+/// （§5）。各檢查自己不必知道別人的存在。
+fn finish(mut report: Report, opts: &BakeOptions) -> Result<Report> {
+    report::sort_by_suspicion(&mut report.diagnostics);
     if let Some(path) = &opts.report_json {
         if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
             std::fs::create_dir_all(parent)

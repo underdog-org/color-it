@@ -166,6 +166,9 @@ pub struct Orphan {
     pub area: u32,
     /// raster order 的第一個像素。診斷座標用，不需要是重心。
     pub anchor: (u32, u32),
+    /// `[x, y, w, h]`。`--debug-out` 的 `seeds-overlay.png` 用它畫黃框——
+    /// 只給 anchor 的話，繪師看到的是一個點而不是「這一整塊你沒點」。
+    pub bbox: [u32; 4],
 }
 
 /// 沒有任何 seed 認領的自由區（非線像素且未指派）的 4-連通塊。
@@ -185,11 +188,13 @@ pub fn find_orphans(labels: &[u32], line: &[bool], width: u32, height: u32) -> V
             continue;
         }
         let mut area = 0u32;
+        let mut bounds = Bounds::default();
         seen[start] = true;
         stack.push(start);
         while let Some(p) = stack.pop() {
             area += 1;
             let (x, y) = (p % w, p / w);
+            bounds.add(x as u32, y as u32);
             let mut visit = |n: usize, stack: &mut Vec<usize>| {
                 if !seen[n] && free(n) {
                     seen[n] = true;
@@ -212,6 +217,7 @@ pub fn find_orphans(labels: &[u32], line: &[bool], width: u32, height: u32) -> V
         out.push(Orphan {
             area,
             anchor: ((start % w) as u32, (start / w) as u32),
+            bbox: bounds.bbox(),
         });
     }
 
@@ -262,7 +268,15 @@ pub fn merge_small_orphans(
         let anchor = ((start % w) as u32, (start / w) as u32);
         let area = block.len() as u32;
         if area >= min_area {
-            kept.push(Orphan { area, anchor });
+            let mut bounds = Bounds::default();
+            for &p in &block {
+                bounds.add((p % w) as u32, (p / w) as u32);
+            }
+            kept.push(Orphan {
+                area,
+                anchor,
+                bbox: bounds.bbox(),
+            });
             continue;
         }
         if let Some(id) = nearest_region(&block, labels, line, w, h, region_areas) {
@@ -314,6 +328,38 @@ fn nearest_region(
         std::mem::swap(&mut frontier, &mut next);
     }
     None
+}
+
+/// 邊掃邊收 bbox。`Default` 是空的（min 在 max 之上），`add` 一次之後才有意義。
+#[derive(Debug, Clone, Copy)]
+struct Bounds {
+    min: (u32, u32),
+    max: (u32, u32),
+}
+
+impl Default for Bounds {
+    fn default() -> Self {
+        Self {
+            min: (u32::MAX, u32::MAX),
+            max: (0, 0),
+        }
+    }
+}
+
+impl Bounds {
+    fn add(&mut self, x: u32, y: u32) {
+        self.min = (self.min.0.min(x), self.min.1.min(y));
+        self.max = (self.max.0.max(x), self.max.1.max(y));
+    }
+
+    fn bbox(&self) -> [u32; 4] {
+        [
+            self.min.0,
+            self.min.1,
+            self.max.0 - self.min.0 + 1,
+            self.max.1 - self.min.1 + 1,
+        ]
+    }
 }
 
 fn for_each_neighbor(p: usize, w: usize, h: usize, mut f: impl FnMut(usize)) {

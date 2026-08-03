@@ -186,7 +186,8 @@ pub fn seeds(
 pub const SHADE_MIN_LUMA: u8 = 60;
 
 pub fn shade(shade_white: &[u8], width: u32) -> Vec<Diagnostic> {
-    let mut coords = Coords::master();
+    // 逐像素的症狀，聚類（§5）——整片過暗會是幾十萬個座標。
+    let mut coords = Coords::clustered();
     let mut darkest = 255u8;
     for (i, px) in shade_white.chunks_exact(4).enumerate() {
         let y = luma([px[0], px[1], px[2]]);
@@ -260,6 +261,7 @@ mod tests {
         let orphans = [Orphan {
             area: 900,
             anchor: (50, 50),
+            bbox: [50, 50, 30, 30],
         }];
         let out = seeds(
             &list,
@@ -289,7 +291,7 @@ mod tests {
             MIN_ORPHAN_AREA,
         );
         let d = out.iter().find(|d| d.code == code::SEED_COLLISION).unwrap();
-        assert_eq!(d.coords, vec![(1, 1), (7, 3)]);
+        assert_eq!(d.points(), vec![(1, 1), (7, 3)]);
     }
 
     /// orphan 依面積遞減——「該先看哪個」是報告的排序依據（§5）。
@@ -299,10 +301,12 @@ mod tests {
             Orphan {
                 area: 9000,
                 anchor: (9, 9),
+                bbox: [9, 9, 90, 100],
             },
             Orphan {
                 area: 600,
                 anchor: (1, 1),
+                bbox: [1, 1, 20, 30],
             },
         ];
         let out = seeds(
@@ -313,7 +317,7 @@ mod tests {
             MIN_ORPHAN_AREA,
         );
         let d = out.iter().find(|d| d.code == code::ORPHAN_AREA).unwrap();
-        assert_eq!(d.coords, vec![(9, 9), (1, 1)]);
+        assert_eq!(d.points(), vec![(9, 9), (1, 1)]);
         assert!(d.message.contains("9000px"), "{}", d.message);
     }
 
@@ -358,6 +362,6 @@ mod tests {
         let dark = vec![10u8, 10, 10, 255, 255, 255, 255, 255];
         let out = shade(&dark, 2);
         assert_eq!(out[0].code, code::SHADE_TOO_DARK);
-        assert_eq!(out[0].coords, vec![(0, 0)]);
+        assert_eq!(out[0].points(), vec![(0, 0)]);
     }
 }
