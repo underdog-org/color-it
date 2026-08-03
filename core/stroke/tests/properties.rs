@@ -6,7 +6,7 @@
 mod support;
 
 use stroke::{BrushPreset, StrokeBuilder, Vec2, generate_dabs};
-use support::{DT, dwell, fast_turn, slow_line, stylus_ramp};
+use support::{DT, bits, dwell, fast_turn, slow_line, stylus_ramp};
 
 const SIZE: f32 = 24.0;
 const SEED: u32 = 0x5eed;
@@ -232,6 +232,121 @@ fn builder_is_usable_frame_by_frame() {
     }
     let all = b.finish();
     assert!(total > 0 && total <= all.len());
+}
+
+// ── RNG 契約（`E2-brush.md §6.2`）─────────────────────────────────────────
+//
+// **這組與參數值無關，所以現在就是 gate，不必等 D5 定案。** golden fixture 標
+// `#[ignore]` 是因為它比對具體數值；這幾條比對的是不變式，調參數不會弄紅它們。
+
+#[test]
+fn the_same_seed_replays_bit_for_bit() {
+    // 契約第一條：一筆一個 seed。少了它，E3 的縮時重播會與原作不同。
+    for (name, make) in BrushPreset::ALL {
+        let preset = make();
+        let a = generate_dabs(&fast_turn(), &preset, SIZE, SEED);
+        let b = generate_dabs(&fast_turn(), &preset, SIZE, SEED);
+        assert_eq!(bits(&a), bits(&b), "{name} 同 seed 兩次執行不同");
+    }
+
+    // 有 jitter 的那支，換 seed 就該換一組顆粒——否則 seed 根本沒接上。
+    let crayon = BrushPreset::crayon();
+    let a = generate_dabs(&fast_turn(), &crayon, SIZE, SEED);
+    let b = generate_dabs(&fast_turn(), &crayon, SIZE, SEED ^ 0xffff);
+    assert_ne!(bits(&a), bits(&b), "換 seed 沒有換掉 jitter");
+}
+
+#[test]
+fn zero_jitter_makes_the_seed_irrelevant() {
+    let mut preset = BrushPreset::crayon();
+    preset.jitter_pos = 0.0;
+    preset.jitter_size = 0.0;
+    preset.jitter_angle = 0.0;
+
+    let a = generate_dabs(&fast_turn(), &preset, SIZE, SEED);
+    let b = generate_dabs(&fast_turn(), &preset, SIZE, SEED ^ 0xffff);
+    assert_eq!(bits(&a), bits(&b), "jitter 全 0 時 seed 仍然影響輸出");
+}
+
+#[test]
+fn jitter_does_not_feed_back_into_sampling() {
+    let base = BrushPreset::crayon();
+    let n = generate_dabs(&fast_turn(), &base, SIZE, SEED).len();
+
+    for (label, mutate) in [
+        (
+            "jitter_pos",
+            (|p: &mut BrushPreset| p.jitter_pos *= 3.0) as fn(&mut BrushPreset),
+        ),
+        ("jitter_size", |p: &mut BrushPreset| p.jitter_size = 0.4),
+        ("jitter_angle", |p: &mut BrushPreset| p.jitter_angle *= 0.5),
+    ] {
+        let mut preset = base;
+        mutate(&mut preset);
+        let dabs = generate_dabs(&fast_turn(), &preset, SIZE, SEED);
+        assert_eq!(dabs.len(), n, "改 {label} 改變了 dab 數量");
+    }
+
+    // 位置只有 `jitter_pos` 動得到：改另外兩欄，擾動前的取樣位置必須一動不動。
+    let mut preset = base;
+    preset.jitter_size = 0.4;
+    preset.jitter_angle *= 0.5;
+    let moved = generate_dabs(&fast_turn(), &preset, SIZE, SEED);
+    let base_dabs = generate_dabs(&fast_turn(), &base, SIZE, SEED);
+    assert!(
+        moved
+            .iter()
+            .zip(&base_dabs)
+            .all(|(a, b)| a.pos.x.to_bits() == b.pos.x.to_bits()
+                && a.pos.y.to_bits() == b.pos.y.to_bits()),
+        "改 jitter_size／jitter_angle 動到了取樣位置"
+    );
+}
+
+#[test]
+fn only_the_presets_that_ask_for_it_react_to_speed() {
+    let mut checked_zero = 0;
+    for (name, make) in BrushPreset::ALL {
+        let mut preset = make();
+        // jitter_size 也會動到 size，先關掉才量得到速度那一項。
+        preset.jitter_size = 0.0;
+        let dabs = generate_dabs(&fast_turn(), &preset, SIZE, SEED);
+        let sizes: Vec<u32> = dabs.iter().map(|d| d.size.to_bits()).collect();
+        let uniform = sizes.windows(2).all(|w| w[0] == w[1]);
+
+        if preset.velocity_to_size == 0.0 {
+            assert!(
+                uniform,
+                "{name} 的 velocity_to_size 是 0，size 卻跟著速度變了"
+            );
+            checked_zero += 1;
+        } else {
+            assert!(!uniform, "{name} 的 velocity_to_size 非 0，size 卻沒反應");
+        }
+    }
+    assert_eq!(checked_zero, 3, "§4.2 說五支裡有三支不吃速度");
+}
+
+#[test]
+fn speed_makes_the_stroke_thinner_never_thicker() {
+    // 語意方向：越快越細。反過來會讓快掃變成粗線——那是「手滑一下就一大坨」。
+    let preset = BrushPreset::airbrush();
+    let dabs = generate_dabs(&fast_turn(), &preset, SIZE, SEED);
+    let at_rest = SIZE * preset.pressure_to_size.eval(0.5);
+    for d in &dabs {
+        assert!(
+            d.size <= at_rest + 1e-4,
+            "速度把 size 放大了：{} > {at_rest}",
+            d.size
+        );
+    }
+    // 而且真的細到看得出來，不是四捨五入等級的差異。
+    let min = dabs.iter().map(|d| d.size).fold(f32::MAX, f32::min);
+    assert!(
+        min < at_rest * 0.95,
+        "快掃只細了 {}%",
+        100.0 - min / at_rest * 100.0
+    );
 }
 
 /// 兩條線段是否真的交叉（共端點不算）。

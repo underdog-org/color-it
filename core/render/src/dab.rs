@@ -1,17 +1,5 @@
 //! Pass 1 · Stroke（`docs/specs/E1-stroke.md §7`）。
 //!
-//! 檔名是 `dab` 而不是 `stroke`：`render` 依賴 `stroke` crate，同名的模組會讓
-//! `use stroke::Dab` 在 2018 起的 uniform path 下變成歧義（E0659）。
-//!
-//! ```text
-//! instanced quad × dab_count → T_wet
-//! scissor：本 frame 新增 dab 的 bbox（不是整筆的 bbox）
-//! ```
-//!
-//! **自己 submit**，不併進 frame encoder：`MAX_DABS_PER_DRAW` 的分批要各自
-//! `write_buffer` 同一條 instance buffer，而 `Queue::write_buffer` 是在 submit 時
-//! 才依序落地的——同一次 submit 裡寫兩次，第二批會把第一批蓋掉，於是「畫太快」
-//! 變成「只畫得出最後 4096 個 dab」。同一條 queue 上的順序仍然有保證。
 
 use bytemuck::{Pod, Zeroable};
 use stroke::{Dab, MAX_DABS_PER_DRAW, TipId};
@@ -23,15 +11,19 @@ use crate::resources::DocumentResources;
 /// 筆尖貼圖的邊長，px（`E1-stroke.md §6.1`）。
 const TIP_SIZE: u32 = 256;
 
-/// `TipId` 的變體數 ＝ array 的 layer 數。**E1 只有 layer 0 有內容**——
-/// 其餘兩層由 [`DabInstance::new`] 的 fallback 保證取不到（`§6`）。
+/// `TipId` 的變體數 ＝ array 的 layer 數。三層都有內容。
 const TIP_LAYERS: u32 = 3;
 
 /// 軟圓筆尖的衰減指數：`coverage = (1 - d)^TIP_FALLOFF`，`d` 是到圓心的正規化距離。
 ///
-/// 1.0 ＝ 線性衰減。E1 初值，**列入 `E1-perf §7` 的調校表**——它直接決定筆跡邊緣
-/// 的軟硬，是 D3 盲測「看起來像不像筆」的第一嫌疑人。
+/// 1.0 ＝ 線性衰減。**列入調校表**——它直接決定筆跡邊緣的軟硬，是盲測
 pub const TIP_FALLOFF: f32 = 1.0;
+
+/// 硬圓的邊緣過渡寬度，佔半徑的比例。
+const HARD_EDGE: f32 = 0.10;
+const GRAIN_FREQ: u32 = 14;
+const GRAIN_CONTRAST: f32 = 2.2;
+const GRAIN_SEED: u32 = 0x9e37;
 
 /// WGSL 端的 `struct Stroke`。
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
@@ -41,10 +33,7 @@ struct StrokeUniform {
     _pad: [f32; 2],
 }
 
-/// `Dab` 的 GPU 版面配置（`E1-stroke.md §14` 決議 G）。
-///
-/// `stroke::Dab` 刻意沒有 `repr(C)` 也沒有 `bytemuck`——版面配置是 `render` 的事，
-/// Boundary 2 才守得住。
+/// `Dab` 的 GPU 版面配置
 #[derive(Debug, Clone, Copy, PartialEq, Pod, Zeroable)]
 #[repr(C)]
 pub struct DabInstance {
@@ -59,30 +48,14 @@ pub struct DabInstance {
 const _: () = assert!(size_of::<DabInstance>() == 24);
 
 impl DabInstance {
-    /// 未實作的 tip 一律 fallback 到軟圓筆並記一次 log（`E1-stroke.md §6`）。
-    ///
-    /// fallback 做在這裡而不是 shader：layer 1／2 因此**在建構上**取不到，
-    /// 空貼圖被取樣得到透明筆跡這種靜默失敗沒有發生的餘地。
+    /// **沒有 fallback**：`tip_atlas` 填滿 `TIP_LAYERS` 層，缺層是建置期的錯，
     pub fn new(dab: &Dab) -> Self {
-        let tip = if dab.tip.is_implemented() {
-            dab.tip
-        } else {
-            static ONCE: std::sync::Once = std::sync::Once::new();
-            ONCE.call_once(|| {
-                eprintln!(
-                    "[colorlull] tip {:?} 尚未實作（排程 E2），本次筆畫 fallback 到軟圓筆",
-                    dab.tip
-                );
-            });
-            TipId::SoftRound
-        };
-
         Self {
             pos: [dab.pos.x, dab.pos.y],
             size: dab.size,
             angle: dab.angle,
             alpha: dab.alpha,
-            layer: tip.layer(),
+            layer: dab.tip.layer(),
         }
     }
 }
@@ -345,10 +318,8 @@ fn blend(src: wgpu::BlendFactor, operation: wgpu::BlendOperation) -> wgpu::Blend
     }
 }
 
-/// 程序生成的筆尖，**不進 `.colorpack` 也不進 app bundle**（`E1-stroke.md §6.1`）。
-///
-/// 只填 layer 0（軟圓）。E2 的顆粒／蠟筆紋才需要真的貼圖資產，屆時多填兩層即可，
-/// bind group layout 不動。
+/// 三張程序生成的筆尖，**不進 `.colorpack`、不進 `assets/`、不進 app bundle**
+/// （`E1-stroke.md §6.1`）。它們是程式碼常數，不是文件資產。
 fn tip_atlas(gpu: &Gpu) -> wgpu::Texture {
     let texture = gpu.device().create_texture(&wgpu::TextureDescriptor {
         label: Some("T_tip"),
@@ -365,34 +336,38 @@ fn tip_atlas(gpu: &Gpu) -> wgpu::Texture {
         view_formats: &[],
     });
 
-    gpu.queue().write_texture(
-        wgpu::TexelCopyTextureInfo {
-            texture: &texture,
-            mip_level: 0,
-            origin: wgpu::Origin3d {
-                x: 0,
-                y: 0,
-                z: TipId::SoftRound.layer(),
+    // 每個變體各寫一層。**這裡漏一層不會有 fallback 接住**（`DabInstance::new`），
+    // 所以是 match 而不是清單——加了 `TipId` 卻忘了生成器，編譯就會擋下來。
+    for tip in [TipId::SoftRound, TipId::HardRound, TipId::Grain] {
+        gpu.queue().write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d {
+                    x: 0,
+                    y: 0,
+                    z: tip.layer(),
+                },
+                aspect: wgpu::TextureAspect::All,
             },
-            aspect: wgpu::TextureAspect::All,
-        },
-        &soft_round(),
-        wgpu::TexelCopyBufferLayout {
-            offset: 0,
-            bytes_per_row: Some(TIP_SIZE),
-            rows_per_image: Some(TIP_SIZE),
-        },
-        wgpu::Extent3d {
-            width: TIP_SIZE,
-            height: TIP_SIZE,
-            depth_or_array_layers: 1,
-        },
-    );
+            &tip_texels(tip),
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(TIP_SIZE),
+                rows_per_image: Some(TIP_SIZE),
+            },
+            wgpu::Extent3d {
+                width: TIP_SIZE,
+                height: TIP_SIZE,
+                depth_or_array_layers: 1,
+            },
+        );
+    }
     texture
 }
 
-/// 解析式的徑向衰減：`coverage = (1 - d)^TIP_FALLOFF`，圓外為 0。
-fn soft_round() -> Vec<u8> {
+/// 一層的 R8 覆蓋率。純函式、零 GPU 依賴，所以三張 tip 的形狀在無 GPU 的 CI 上驗得到。
+fn tip_texels(tip: TipId) -> Vec<u8> {
     let n = TIP_SIZE as f32;
     let mut data = Vec::with_capacity((TIP_SIZE * TIP_SIZE) as usize);
     for y in 0..TIP_SIZE {
@@ -401,13 +376,130 @@ fn soft_round() -> Vec<u8> {
             let u = (x as f32 + 0.5) / n * 2.0 - 1.0;
             let v = (y as f32 + 0.5) / n * 2.0 - 1.0;
             let d = (u * u + v * v).sqrt();
-            let coverage = if d >= 1.0 {
-                0.0
-            } else {
-                (1.0 - d).powf(TIP_FALLOFF)
+
+            let coverage = match tip {
+                TipId::SoftRound => radial_falloff(d),
+                TipId::HardRound => hard_edge(d),
+                // 徑向遮罩不是裝飾：少了它，方形的 noise 會讓每個 dab 都是方塊。
+                TipId::Grain => grain(x, y) * radial_falloff(d),
             };
-            data.push((coverage * 255.0).round() as u8);
+            data.push((coverage.clamp(0.0, 1.0) * 255.0).round() as u8);
         }
     }
     data
+}
+
+/// 解析式的徑向衰減：`coverage = (1 - d)^TIP_FALLOFF`，圓外為 0。
+fn radial_falloff(d: f32) -> f32 {
+    if d >= 1.0 {
+        0.0
+    } else {
+        (1.0 - d).powf(TIP_FALLOFF)
+    }
+}
+
+/// 同一條徑向路徑，邊緣換成窄過渡的 `smoothstep`：圓內滿覆蓋，最後 `HARD_EDGE`
+/// 那一段落到 0。過渡不是 0 寬，因為那樣邊緣會鋸齒。
+fn hard_edge(d: f32) -> f32 {
+    1.0 - smoothstep(1.0 - HARD_EDGE, 1.0, d)
+}
+
+fn smoothstep(a: f32, b: f32, x: f32) -> f32 {
+    let t = ((x - a) / (b - a)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
+/// value noise：格點取雜湊值、雙線性內插（權重過 `smoothstep`，否則格線會是硬折角）。
+///
+/// 一個 octave 就好。疊 octave 會多出「幾層、各佔多少」兩個常數，而顆粒要調的是
+/// 粗細與對比——那正是 `GRAIN_FREQ` 與 `GRAIN_CONTRAST` 兩顆旋鈕。
+fn grain(x: u32, y: u32) -> f32 {
+    let scale = GRAIN_FREQ as f32 / TIP_SIZE as f32;
+    let (fx, fy) = (x as f32 * scale, y as f32 * scale);
+    let (ix, iy) = (fx.floor(), fy.floor());
+    let (tx, ty) = (smoothstep(0.0, 1.0, fx - ix), smoothstep(0.0, 1.0, fy - iy));
+    let (ix, iy) = (ix as i32, iy as i32);
+
+    let lerp = |a: f32, b: f32, t: f32| a + (b - a) * t;
+    let top = lerp(lattice(ix, iy), lattice(ix + 1, iy), tx);
+    let bottom = lerp(lattice(ix, iy + 1), lattice(ix + 1, iy + 1), tx);
+    let n = lerp(top, bottom, ty);
+
+    // 繞 0.5 拉開對比。低對比是霧，高對比是砂。
+    ((n - 0.5) * GRAIN_CONTRAST + 0.5).clamp(0.0, 1.0)
+}
+
+/// 格點雜湊 → `[0, 1)`。自己寫而不是拉 `rand`：需求只有「決定性、跨平台相同」，
+/// 而 `rand` 的演算法會隨版本變——那會讓顆粒 tip 在升版時默默換一張。
+fn lattice(x: i32, y: i32) -> f32 {
+    let mut h =
+        (x as u32).wrapping_mul(0x27d4_eb2d) ^ (y as u32).wrapping_mul(0x1656_67b1) ^ GRAIN_SEED;
+    h ^= h >> 15;
+    h = h.wrapping_mul(0x2c1b_3c6d);
+    h ^= h >> 12;
+    h = h.wrapping_mul(0x2974_5c85);
+    h ^= h >> 16;
+    // 取高 24 bit：f32 的尾數就這麼寬，除法是精確的 2 的冪。
+    (h >> 8) as f32 / (1u32 << 24) as f32
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 三層都有內容。**缺一層現在沒有 fallback**，所以這條守的是
+    /// 「刻意缺層會產生明顯的空白筆跡」的另一面：正常路徑三層都不是空白。
+    #[test]
+    fn every_tip_layer_has_ink() {
+        for tip in [TipId::SoftRound, TipId::HardRound, TipId::Grain] {
+            let texels = tip_texels(tip);
+            assert_eq!(texels.len(), (TIP_SIZE * TIP_SIZE) as usize);
+            let inked = texels.iter().filter(|&&t| t > 0).count();
+            assert!(
+                inked > texels.len() / 4,
+                "{tip:?} 只有 {inked} 個非零 texel——這層等於空白"
+            );
+        }
+    }
+
+    #[test]
+    fn the_three_tips_are_actually_different() {
+        let (soft, hard, grain) = (
+            tip_texels(TipId::SoftRound),
+            tip_texels(TipId::HardRound),
+            tip_texels(TipId::Grain),
+        );
+        assert_ne!(soft, hard);
+        assert_ne!(soft, grain);
+        assert_ne!(hard, grain);
+    }
+
+    /// 「硬」的定義：從滿覆蓋掉到全透明只花很短的一段半徑。
+    #[test]
+    fn hard_round_is_flat_until_it_is_not() {
+        assert!(hard_edge(0.5) > 0.99, "圓內該是滿覆蓋，硬邊才立得住");
+        assert!(hard_edge(1.0) == 0.0);
+        // 同一個半徑上，軟圓已經掉了一半，硬圓還沒開始掉。
+        assert!(hard_edge(0.5) > radial_falloff(0.5) * 1.5);
+    }
+
+    /// 顆粒得真的不規則。一張常數貼圖也會通過「有內容」，但畫出來是軟圓。
+    #[test]
+    fn grain_is_irregular() {
+        let samples: Vec<f32> = (0..TIP_SIZE)
+            .step_by(3)
+            .map(|i| grain(i, TIP_SIZE / 2))
+            .collect();
+        let mean = samples.iter().sum::<f32>() / samples.len() as f32;
+        let var = samples.iter().map(|s| (s - mean).powi(2)).sum::<f32>() / samples.len() as f32;
+        assert!(var > 0.02, "顆粒的變異數只有 {var}——這張 tip 太平了");
+    }
+
+    /// 徑向遮罩把方形的 noise 收成圓形，否則每個 dab 都是方塊。
+    #[test]
+    fn grain_is_masked_into_a_circle() {
+        let texels = tip_texels(TipId::Grain);
+        let corner = texels[0];
+        assert_eq!(corner, 0, "四角落在圓外，必須是 0");
+    }
 }

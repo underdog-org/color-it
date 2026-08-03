@@ -479,7 +479,7 @@ let base = mix(f.prev_color, palette[id], t);    // 併進 composite 第 ① 層
 
 ```rust
 pub struct BrushPreset {
-    pub tip: TipId,                    // 軟圓 / 硬圓 / 顆粒 / 蠟筆紋
+    pub tip: TipId,                    // 軟圓 / 硬圓 / 顆粒（三張，全程序生成）
     pub spacing: f32,                  // dab 間距（筆尖直徑比）
     pub pressure_to_size: Curve,
     pub pressure_to_opacity: Curve,
@@ -496,13 +496,23 @@ pub struct BrushPreset {
 }
 ```
 
-| Preset | tip | spacing | blend | build_up | edge_boost |
-|---|---|---|---|---|---|
-| 軟圓筆 | 軟圓 | 0.05 | Normal | false | 0 |
-| 麥克筆 | 硬圓 | 0.04 | Multiply | false | 0 |
-| 蠟筆 | 顆粒紋理 | 0.08 | Normal | false | 0 |
-| 噴槍 | 大軟圓 | 0.02 | Normal | **true** | 0 |
-| 水彩 | 軟圓 | 0.06 | Multiply | **true** | **> 0**（初值待 E2 調校） |
+**下表四欄是定性的差異軸，D5 調不到。** 十四欄的實際數值不在文件裡——唯一真相是
+`core/stroke/src/preset.rs`，D5 盲測必然調動其中一半，寫進文件就是寫完即過期。
+
+| Preset | tip | blend | build_up | 主要差異軸 |
+|---|---|---|---|---|
+| 軟圓筆 | 軟圓 | Normal | false | —（它是另外四支的對照組） |
+| 麥克筆 | 硬圓 | **Multiply** | false | 硬邊 ＋ 疊色變深 |
+| 蠟筆 | **顆粒** | Normal | false | 顆粒 ＋ jitter 打散 ＋ 大 spacing 留白 |
+| 噴槍 | 軟圓 | Normal | **true** | 同筆內累積 |
+| 水彩 | 軟圓 | **Multiply** | **true** | **`edge_boost > 0`** |
+
+「大軟圓」＝同一張軟圓 tip 由 `Tool::Brush.size` 放大，**不是第四個 `TipId`**。
+
+`velocity_to_size` 只有噴槍與水彩非 0（快掃留下較細的筆觸）；語意方向是「越快越細」，
+欄位值是耦合強度，正規化用固定參考速度常數 `stroke::REFERENCE_SPEED`，
+不用 per-stroke baseline——慢筆就該全程粗。`tilt_to_size` 五支全 0：手指恆無 tilt，
+而 Pencil 進階是 v1 不做，**路徑不實作**。
 
 `Curve` 是三個參數、無編輯器、完全決定性（`core/stroke` 的 `Curve`，§5.3）：
 

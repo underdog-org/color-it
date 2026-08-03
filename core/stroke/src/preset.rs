@@ -4,15 +4,11 @@
 //! enum、＝筆刷 ID；這邊是十四欄的參數 struct。`stroke` 不依賴 `app-state`（同層 crate，
 //! 不在下游），所以 ID → 參數的對應寫在 `engine`。
 
-/// tip 貼圖在 `texture_2d_array<f32>` 裡的 layer index（`E1-stroke.md §6.1`）。
-///
-/// 從第一天就用 array 而非單張，是為了讓 E2 加 tip 不動 bind group layout。
-/// **E1 只有 `SoftRound` 真的畫得出來**，而且是程序生成的解析式徑向衰減，不進資產。
+/// tip 貼圖在 `texture_2d_array<f32>` 裡的 layer index
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TipId {
     SoftRound,
     HardRound,
-    /// 顆粒紋理（蠟筆）。E2 才有真的貼圖。
     Grain,
 }
 
@@ -24,11 +20,6 @@ impl TipId {
             Self::Grain => 2,
         }
     }
-
-    /// E1 只實作軟圓。`render` 依此決定要不要 fallback 並記一次 log（`E1-stroke.md §6`）。
-    pub fn is_implemented(self) -> bool {
-        matches!(self, Self::SoftRound)
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -37,10 +28,7 @@ pub enum BlendMode {
     Multiply,
 }
 
-/// 三個參數、無編輯器、完全決定性（`E1-stroke.md §6`）。
-///
 /// 不用 LUT 或貝茲：`prd.md` 的 Don't Have 禁止使用者編輯筆刷參數，所以曲線只需要
-/// 「表達得出五支 preset 的差異」，不需要可編輯性。
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Curve {
     pub min: f32,
@@ -90,8 +78,11 @@ pub struct BrushPreset {
     pub edge_boost: f32,
 }
 
+/// preset 名 ＋ 建構子。名字進 golden fixture，失敗訊息才指得出是哪一支。
+pub type Named = (&'static str, fn() -> BrushPreset);
+
 impl BrushPreset {
-    /// E1 唯一實作得完整的一支（`E1-stroke.md §6`）。
+    /// 五支的對照組：乾淨、無 jitter、壓感同時驅動 size 與 opacity。
     pub const fn soft_round() -> Self {
         Self {
             tip: TipId::SoftRound,
@@ -111,45 +102,87 @@ impl BrushPreset {
         }
     }
 
-    // ── 其餘四支照 `architecture.md §4.6` 的表登記 ─────────────────────────
-    // **E1 都不實作**：曲線一律沿用軟圓筆的初值，等 E2 調校。登記在這裡是為了讓
-    // 「哪些欄位已定案、哪些還沒」看得見——散在別處會變成沒人知道的待辦。
+    // ── 其餘四支：每支只靠一到兩個軸與另外四支區分 ─────────────────────────
+    //
+    // **這裡的數值全是初值，D5 盲測會調動其中一半。** 方向（哪幾欄是差異軸）
+    // 才是定案的部分——若某支的軸被推翻，那才是要回頭改設計的事。
+    // 只寫 `..soft_round()` 沒覆蓋的欄位，差異因此在 diff 上一眼看得見。
 
+    /// 兩軸：**硬圓 tip ＋ Multiply**。硬邊、疊色變深。
+    ///
+    /// `pressure_to_opacity` 刻意窄到接近恆定——真實麥克筆的墨水濃度均勻，
+    /// 壓感該走 size 而不是濃度。`spacing` 比軟圓筆更小：硬邊在轉彎處的
+    /// 扇貝狀鋸齒是 dab 間距露出來的，軟邊藏得住，硬邊藏不住。
     pub const fn marker() -> Self {
         Self {
             tip: TipId::HardRound,
-            spacing: 0.04,
+            spacing: 0.03,
+            pressure_to_size: Curve::new(0.55, 1.0, 1.0),
+            pressure_to_opacity: Curve::new(0.90, 1.0, 1.0),
+            flow: 1.0,
+            opacity: 0.95,
             blend: BlendMode::Multiply,
             ..Self::soft_round()
         }
     }
 
+    /// 一軸主導：**顆粒 tip**。但貼圖本身不夠——同一張 noise 沿路徑重複貼會
+    /// 看出規律條紋，那看起來像貼圖 bug 而不是蠟筆。
+    ///
+    /// 所以兩個 jitter 是必要的、不是裝飾：`jitter_angle` 把每個 dab 的顆粒轉開，
+    /// `jitter_pos` 錯開，重複因此消失。大 `spacing` ＋ 低 `flow` 讓 dab 之間留白——
+    /// 「蠟筆沒塗滿」的觀感來自這裡，不是來自貼圖。
+    ///
+    /// `jitter_size` 留 0：留白已經夠明顯時，size 的抖動只會讓邊界變髒。
     pub const fn crayon() -> Self {
         Self {
             tip: TipId::Grain,
-            spacing: 0.08,
+            spacing: 0.30,
+            pressure_to_size: Curve::new(0.45, 1.0, 1.0),
+            pressure_to_opacity: Curve::new(0.35, 1.0, 1.2),
+            jitter_pos: 0.12,
+            jitter_angle: 1.0,
+            flow: 0.55,
+            opacity: 0.90,
             ..Self::soft_round()
         }
     }
 
-    /// 「大軟圓」＝同一張 tip、由 `Tool::Brush.size` 放大，不是另一個 `TipId`。
     pub const fn airbrush() -> Self {
         Self {
-            spacing: 0.02,
+            spacing: 0.015,
+            pressure_to_size: Curve::new(0.50, 1.0, 1.0),
+            pressure_to_opacity: Curve::new(0.30, 1.0, 1.0),
+            velocity_to_size: 0.35,
+            flow: 0.08,
             build_up: true,
             ..Self::soft_round()
         }
     }
 
-    /// `edge_boost` 的初值待 E2 調校，先留 0.0（＝不套用）而不是猜一個數字。
     pub const fn watercolor() -> Self {
         Self {
-            spacing: 0.06,
+            spacing: 0.05,
+            pressure_to_size: Curve::new(0.40, 1.0, 1.0),
+            pressure_to_opacity: Curve::new(0.35, 1.0, 1.0),
+            velocity_to_size: 0.45,
             blend: BlendMode::Multiply,
+            flow: 0.15,
+            opacity: 0.80,
             build_up: true,
+            edge_boost: 0.60,
             ..Self::soft_round()
         }
     }
+
+    /// 五支，順序＝ `app_state::BrushPreset` 的宣告順序。測試與 golden fixture 用。
+    pub const ALL: [Named; 5] = [
+        ("soft_round", Self::soft_round),
+        ("marker", Self::marker),
+        ("crayon", Self::crayon),
+        ("airbrush", Self::airbrush),
+        ("watercolor", Self::watercolor),
+    ];
 }
 
 impl Default for BrushPreset {
@@ -186,19 +219,73 @@ mod tests {
         assert_eq!(layers, vec![0, 1, 2]);
     }
 
+    /// 定性的差異軸（`E2-brush.md §3` 的表）。**D5 調不到這四欄**——
+    /// 調得到的是幅度，這裡守的是方向。某一格被改動就是設計被推翻，
+    /// 那該是一次自覺的決定，不該是調參數的副作用。
     #[test]
-    fn only_soft_round_is_implemented_in_e1() {
-        assert!(BrushPreset::soft_round().tip.is_implemented());
-        for p in [
-            BrushPreset::marker(),
-            BrushPreset::crayon(),
-            BrushPreset::watercolor(),
-        ] {
-            let _ = p;
+    fn the_five_differ_on_the_axes_the_design_claims() {
+        let axes = |p: BrushPreset| (p.tip, p.blend, p.build_up, p.edge_boost > 0.0);
+
+        assert_eq!(
+            axes(BrushPreset::soft_round()),
+            (TipId::SoftRound, BlendMode::Normal, false, false),
+            "軟圓筆是對照組，不得有任何特色"
+        );
+        assert_eq!(
+            axes(BrushPreset::marker()),
+            (TipId::HardRound, BlendMode::Multiply, false, false),
+            "麥克筆＝硬圓 ＋ Multiply"
+        );
+        assert_eq!(
+            axes(BrushPreset::crayon()),
+            (TipId::Grain, BlendMode::Normal, false, false),
+            "蠟筆的軸是顆粒 tip"
+        );
+        assert_eq!(
+            axes(BrushPreset::airbrush()),
+            (TipId::SoftRound, BlendMode::Normal, true, false),
+            "噴槍的軸是 build_up，tip 與軟圓筆同一張"
+        );
+        assert_eq!(
+            axes(BrushPreset::watercolor()),
+            (TipId::SoftRound, BlendMode::Multiply, true, true),
+            "水彩的獨佔軸是 edge_boost"
+        );
+    }
+
+    #[test]
+    fn crayon_needs_jitter_or_the_grain_repeats() {
+        // §3.3：少了這兩欄，同一張 noise 沿路徑重複貼會看出規律條紋——
+        // 那看起來像貼圖 bug，不像蠟筆。
+        let c = BrushPreset::crayon();
+        assert!(c.jitter_angle > 0.0, "顆粒不轉開就會出現重複條紋");
+        assert!(c.jitter_pos > 0.0, "顆粒不錯開就會出現重複條紋");
+        assert!(
+            c.spacing > BrushPreset::soft_round().spacing * 2.0,
+            "留白靠大 spacing"
+        );
+    }
+
+    #[test]
+    fn only_the_two_with_real_world_taper_react_to_velocity() {
+        // §4.2：噴槍與水彩的真實對應物都有「快掃留下較細筆觸」的性質；
+        // 軟圓筆要乾淨、麥克筆墨水均勻、蠟筆的稀疏該由 spacing 與 jitter 表達。
+        for (name, make) in BrushPreset::ALL {
+            let want_nonzero = matches!(name, "airbrush" | "watercolor");
+            assert_eq!(
+                make().velocity_to_size > 0.0,
+                want_nonzero,
+                "{name} 的 velocity_to_size"
+            );
         }
-        assert!(!TipId::HardRound.is_implemented());
-        assert!(!TipId::Grain.is_implemented());
-        // 噴槍用的也是軟圓 tip，所以它「畫得出來」，只是 build_up 的 blend 是 E2。
-        assert!(BrushPreset::airbrush().tip.is_implemented());
+    }
+
+    #[test]
+    fn tilt_is_wired_to_nothing() {
+        // §4.1：`InputSample.tilt` 只有 Apple Pencil 有值，而 Pencil 進階是 v1 不做。
+        // 五支全 0，路徑不實作——一條沒有輸入來源的耦合只會多一組測不到的分支。
+        for (name, make) in BrushPreset::ALL {
+            assert_eq!(make().tilt_to_size, 0.0, "{name} 不得依賴 tilt");
+        }
     }
 }

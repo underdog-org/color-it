@@ -1,13 +1,8 @@
 //! Golden test（`E1-stroke.md §10`）。`stroke` 是全專案唯一能在 CI 防手感回歸的地方。
 //!
-//! # 為什麼全部標 `#[ignore]`
-//!
-//! **E1 不設為 CI gate**：One-Euro 與 `R_EPS` 的參數還在實機調校，每調一次
-//! fixture 就會全紅——一組永遠是紅的測試等於沒有測試。E2 參數定案後拿掉
-//! `#[ignore]` 即為 gate（`§14` 決議 D）。
-//!
-//! 真正現在就守著的是 `equivalence.rs`（串流／批次等價、同 seed 逐位元相同）
-//! 與 `properties.rs`（不 overshoot、不打結）——它們與參數值無關。
+//! 參數尚未定案：D5 盲測必然會調動五支裡一半的欄位，每調一次 fixture 就會
+//! 全紅——一組永遠是紅的測試等於沒有測試。**解 `#[ignore]` 排在所有參數定案
+//! 之後**（`E2-brush.md §6.4`），提前解除只會再標回去。
 //!
 //! ```sh
 //! cargo test -p colorlull-stroke --test golden -- --ignored              # 比對
@@ -100,16 +95,24 @@ fn path(name: &str) -> PathBuf {
         .join(format!("{name}.json"))
 }
 
-/// fixture 的輸入軌跡是這裡的 SSOT，期望輸出才存在 JSON 裡——
-/// 兩邊都存會讓「改了軌跡忘了重產」變成靜默通過。
-fn check(name: &str, samples: Vec<InputSample>) {
-    let dabs = generate_dabs(&samples, &BrushPreset::soft_round(), SIZE, SEED);
+/// 一條軌跡對五支 preset。**五支共用同一份輸入**，所以 fixture 之間的差異
+/// 完全來自 preset——差異軸沒實作的話這裡會看得出來。
+fn check_all(trajectory: &str, samples: Vec<InputSample>) {
+    for (preset, make) in BrushPreset::ALL {
+        check(trajectory, preset, make(), &samples);
+    }
+}
+
+fn check(trajectory: &str, preset_name: &str, preset: BrushPreset, samples: &[InputSample]) {
+    let name = format!("{trajectory}_{preset_name}");
+    let name = name.as_str();
+    let dabs = generate_dabs(samples, &preset, SIZE, SEED);
     let path = path(name);
 
     if std::env::var_os("UPDATE_GOLDEN").is_some() {
         let fixture = Fixture {
             name: name.to_owned(),
-            preset: "soft_round".to_owned(),
+            preset: preset_name.to_owned(),
             size: SIZE,
             seed: SEED,
             samples: samples.iter().map(S::from).collect(),
@@ -131,6 +134,7 @@ fn check(name: &str, samples: Vec<InputSample>) {
 
     assert_eq!(want.size, SIZE, "{name}：fixture 的 size 與測試不符");
     assert_eq!(want.seed, SEED, "{name}：fixture 的 seed 與測試不符");
+    assert_eq!(want.preset, preset_name, "{name}：fixture 記的是另一支筆刷");
     assert_eq!(
         want.samples.len(),
         samples.len(),
@@ -162,19 +166,40 @@ fn check(name: &str, samples: Vec<InputSample>) {
 }
 
 #[test]
-#[ignore = "E1 參數調校中，不設為 CI gate（§10）"]
+#[ignore = "參數定案（D5）後解除，見 E2-brush.md §6.4"]
 fn golden_slow_line() {
-    check("slow_line", slow_line());
+    check_all("slow_line", slow_line());
 }
 
 #[test]
-#[ignore = "E1 參數調校中，不設為 CI gate（§10）"]
+#[ignore = "參數定案（D5）後解除，見 E2-brush.md §6.4"]
 fn golden_fast_turn() {
-    check("fast_turn", fast_turn());
+    check_all("fast_turn", fast_turn());
 }
 
 #[test]
-#[ignore = "E1 參數調校中，不設為 CI gate（§10）"]
+#[ignore = "參數定案（D5）後解除，見 E2-brush.md §6.4"]
 fn golden_dwell() {
-    check("dwell", dwell());
+    check_all("dwell", dwell());
+}
+
+/// **這條不是 `#[ignore]`。** 它不比對數值，只確認 15 個 fixture 都在——
+/// 少一個檔案代表某支 preset 或某條軌跡被悄悄漏掉了，而那是上面三條在解除
+/// ignore 之前唯一看得見的失敗方式。
+#[test]
+fn all_fifteen_fixtures_exist() {
+    let mut missing = Vec::new();
+    for trajectory in ["slow_line", "fast_turn", "dwell"] {
+        for (preset, _) in BrushPreset::ALL {
+            let p = path(&format!("{trajectory}_{preset}"));
+            if !p.exists() {
+                missing.push(format!("{trajectory}_{preset}"));
+            }
+        }
+    }
+    assert!(
+        missing.is_empty(),
+        "缺少 {} 個 fixture：{missing:?}。用 UPDATE_GOLDEN=1 產生",
+        missing.len()
+    );
 }

@@ -19,7 +19,7 @@ mod preset;
 mod sample;
 mod spline;
 
-pub use builder::{MAX_DABS_PER_DRAW, R_EPS, StrokeBuilder};
+pub use builder::{MAX_DABS_PER_DRAW, R_EPS, REFERENCE_SPEED, StrokeBuilder};
 pub use dab::Dab;
 pub use filter::OneEuroParams;
 pub use math::Vec2;
@@ -33,10 +33,6 @@ pub use sample::InputSample;
 /// `size` 是筆刷直徑 px（`Tool::Brush.size`）。它不在 `§5.2` 的原簽章裡，但沒有它
 /// 弧長門檻 `spacing × dab_size` 算不出 px（`E1-stroke.md §14` 決議 E）。
 ///
-/// `seed` 讓 jitter 可重現，否則 E3 的縮時重播會與原作不同。
-///
-/// 實作直接委派給 [`StrokeBuilder`]：`§2.1` 的「串流 == 批次」因此是建構上的事實，
-/// 不是兩份程式碼要互相追平的約定。
 pub fn generate_dabs(
     samples: &[InputSample],
     preset: &BrushPreset,

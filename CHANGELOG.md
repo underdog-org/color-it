@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+**五支筆刷（E2，`specs/E2-brush.md`）**
+- 三張 tip 全部程序生成並填滿 atlas 三層：軟圓（既有）、硬圓（窄過渡 `smoothstep`）、顆粒（value noise × 徑向遮罩）。**推翻 `E2-spec-plan` 原拍板的「顆粒用內嵌 PNG」**——noise 的不規則性由 seed／頻率／對比三個常數控制，可調可重現，而顆粒是最需要反覆調的一張
+- `TipId::is_implemented()` 與 `dab.rs` 的 fallback 分支一併移除：三個變體全實作後它恆為真，留著會讓日後「新增第四張 tip 卻忘了填 atlas」靜默退回軟圓
+- 五支 preset 從 `..soft_round()` 佔位填成實際初值，每支只覆蓋自己差異軸上的欄位。**是初值，D5 會調**
+- `velocity_to_size` 從恆 0 啟用（噴槍 ／ 水彩）：速度取自 One-Euro **濾波後**的位置與樣本時間戳，per-dab 值與 `pressure` 走同一條內插路徑，用固定的 `REFERENCE_SPEED` 正規化而非 per-stroke baseline
+- `tilt_to_size` 明確不實作：手指恆無 tilt，Pencil 進階是 v1 不做
+- **修正一個 jitter 的位元不決定性**：`jitter_angle = 0` 時抽到負值會得到 `-0.0`，與 `0.0` 數值相等但位元不同，使「jitter 三欄全 0 → 輸出逐位元相同」的契約敗在一個看不見的符號位
+- `properties.rs` 加五條 RNG 契約與速度的 property test，**現在就是 CI gate**（與參數值無關，不必等 D5）
+- golden fixture 從 3 個擴到 15 個（3 條軌跡 × 5 支），fixture 記下 preset 名。**`#[ignore]` 仍在**——解除排在 D5 參數定案之後，提前解只會再標回去；另加一條不 ignore 的測試守著「15 個檔案都在」
+- `architecture.md §4.6` 的十四欄數值表改為定性的差異軸表：數值的唯一真相是 `preset.rs`，寫進文件就是寫完即過期
+
 **修正（E1）**
 - `RenderContext::attach_surface` 建 surface 的那一段抽成 cfg 分岔的 `create_metal_surface`：`SurfaceTargetUnsafe::CoreAnimationLayer` 是 wgpu 的 `#[cfg(metal)]` variant，非 Apple 平台不存在，CI 的 Linux job 因此整個 workspace 編不過。非 Apple 版本回新的 `RenderError::UnsupportedPlatform`。注意 metal 那一支在 CI 上沒有任何 job 會編到（`ios` job 的 paths-filter 不含 `core/render/**`）
 

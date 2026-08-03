@@ -1,9 +1,6 @@
 //! 串流版的筆畫狀態機（`E1-stroke.md §2`、`§4`、`§5`）。
 //!
 //! **這是全 crate 唯一一份管線實作。** `generate_dabs` 是它的批次外殼，
-//! 所以 `§2.1` 的「串流 == 批次」由建構保證，不是靠兩份程式碼互相追平——
-//! spec 擔心的漂移在這個結構下沒有發生的餘地。測試仍然照設，它守的是
-//! 「後人不要把它拆成兩份」。
 
 use crate::dab::Dab;
 use crate::filter::{OneEuro, OneEuroParams, OneEuroVec2};
@@ -14,33 +11,26 @@ use crate::spline::Segment;
 
 /// `majorRadius` 正規化的分母下限，點（`E1-stroke.md §5`）。實機調校。
 pub const R_EPS: f32 = 4.0;
-
-/// 單次 draw 的 instance 上限（`E1-stroke.md §7`）。超過由 `render` 分批，
-/// **不是靜默截斷**——那會變成「畫太快就斷線」。放在這裡是因為它是 dab 的性質，
-/// 而 `stroke` 是 dab 的出處。
 pub const MAX_DABS_PER_DRAW: usize = 4096;
 
 /// 每個 segment 切幾段折線去逼近弧長。
-///
-/// 32 是精度與成本的折衷：一個 segment 通常只跨兩個樣本（快速移動時 20–40 px），
-/// 折線誤差因此在 0.01 px 量級，遠小於 dab 半徑。
 const SUBSTEPS: u32 = 32;
 
 /// dab 間距的下限，px。`spacing × size` 理論上不會是 0（`pressure_to_size.min` 有底），
-/// 但它是 preset 給的數字——一個 0 會讓弧長取樣原地無限迴圈。
 const MIN_STEP: f32 = 0.05;
+
+/// 初值：120 Hz 下每 frame 約 20 px 的中速掃動。實機調校項。
+pub const REFERENCE_SPEED: f32 = 2400.0;
 
 #[derive(Debug, Clone, Copy)]
 struct Ctrl {
     pos: Vec2,
     pressure: f32,
+    /// 畫布 px／秒，取自**濾波後**的位置與樣本時間戳。
+    speed: f32,
 }
 
 /// per-stroke running baseline（`E1-stroke.md §5`）。
-///
-/// **不用固定 min/max**：`majorRadius` 的絕對值因手指大小而異（`architecture.md §10.2`）。
-/// 已知限制：一筆之內若力道單調遞增，`r_min` 永遠是起筆值，壓感範圍會被壓縮。
-/// 使用者層級的長期基線是更好的解，但它需要跨 session 的狀態——E1 只做 per-stroke。
 #[derive(Debug, Clone, Copy)]
 struct Baseline {
     min: f32,
@@ -48,9 +38,6 @@ struct Baseline {
 }
 
 impl Baseline {
-    /// 初值是 `r₀` **±`R_EPS/2` 的帶狀**，不是 `r₀` 本身（`E1-stroke.md §14` 決議 F）。
-    /// spec 的公式原樣照抄，但若 min/max 都從 `r₀` 起算，起筆的分子恆為 0——
-    /// 每一筆都從最細最淡開始，與同段「此時應為中值」矛盾。帶狀初值讓起筆得 0.5，
     /// 而 min/max 照樣單調外擴。
     fn new(r: f32) -> Self {
         Self {
@@ -66,10 +53,7 @@ impl Baseline {
     }
 }
 
-/// jitter 專用。`seed` 讓它可重現，否則 E3 的縮時重播會與原作不同。
-///
-/// 自己寫 xorshift 而不是拉 `rand`：需求只有「決定性、跨平台逐位元相同」，
-/// 而 `rand` 的演算法會隨版本變——那會讓 golden fixture 在升版時整批變紅。
+/// jitter 專用。`seed` 讓它可重現
 #[derive(Debug, Clone, Copy)]
 struct Rng(u32);
 
@@ -115,6 +99,9 @@ pub struct StrokeBuilder {
     dist_acc: f32,
     /// 下一個 dab 還差多少弧長。隨壓感變化——`spacing` 的單位是筆尖直徑比。
     threshold: f32,
+    /// 上一個真實樣本的時間戳，算速度用。**不能拿 frame 邊界當 dt**——
+    /// coalesced touch 的間隔不均勻（`E1-stroke.md §4.1` 濾波用的是同一個理由）。
+    last_t: Option<f32>,
 }
 
 impl StrokeBuilder {
@@ -131,6 +118,7 @@ impl StrokeBuilder {
             taken: 0,
             dist_acc: 0.0,
             threshold: MIN_STEP,
+            last_t: None,
         }
     }
 
@@ -155,13 +143,33 @@ impl StrokeBuilder {
             sample.pressure.clamp(0.0, 1.0)
         };
 
-        self.pts.push(Ctrl { pos, pressure });
+        let speed = match (self.pts.last(), self.last_t) {
+            (Some(prev), Some(t0)) => {
+                let dt = sample.t - t0;
+                // dt <= 0 是同一時間戳的重複樣本（或時鐘倒退）。除下去會是 inf，
+                // 而一個 inf 速度會讓整段筆跡瞬間縮到最細——沿用前值比較誠實。
+                if dt > 0.0 && dt.is_finite() {
+                    prev.pos.distance(pos) / dt
+                } else {
+                    prev.speed
+                }
+            }
+            // 起筆沒有前一點，速度視為 0：第一個 dab 該是全粗的。
+            _ => 0.0,
+        };
+        self.last_t = Some(sample.t);
+
+        self.pts.push(Ctrl {
+            pos,
+            pressure,
+            speed,
+        });
         let k = self.pts.len() - 1;
 
         if k == 0 {
             // 起筆一定有一個 dab：點一下就該留下一個點，而「原地停留」也因此
             // 恰好只有這一個——濃度不隨停留時間變深。
-            self.emit(pos, pressure);
+            self.emit(pos, pressure, speed);
             return;
         }
         if k >= 2 {
@@ -230,20 +238,29 @@ impl StrokeBuilder {
             self.pts[(j + 2).min(last)].pos,
         ]);
         let (pa, pb) = (self.pts[j].pressure, self.pts[j + 1].pressure);
+        let (va, vb) = (self.pts[j].speed, self.pts[j + 1].speed);
 
         let mut prev = seg.at(0.0);
         let mut prev_u = 0.0;
         for i in 1..=SUBSTEPS {
             let u = i as f32 / SUBSTEPS as f32;
             let cur = seg.at(u);
-            self.walk(prev, prev_u, cur, u, pa, pb);
+            self.walk(prev, prev_u, cur, u, (pa, pb), (va, vb));
             prev = cur;
             prev_u = u;
         }
     }
 
     /// 沿一小段折線前進，每滿一個 `threshold` 就放一個 dab。
-    fn walk(&mut self, from: Vec2, u_from: f32, to: Vec2, u_to: f32, pa: f32, pb: f32) {
+    fn walk(
+        &mut self,
+        from: Vec2,
+        u_from: f32,
+        to: Vec2,
+        u_to: f32,
+        (pa, pb): (f32, f32),
+        (va, vb): (f32, f32),
+    ) {
         let (mut a, mut ua) = (from, u_from);
         loop {
             let len = a.distance(to);
@@ -262,7 +279,7 @@ impl StrokeBuilder {
             let f = need / len;
             let pos = a.lerp(to, f);
             let u = ua + (u_to - ua) * f;
-            self.emit(pos, pa + (pb - pa) * u);
+            self.emit(pos, pa + (pb - pa) * u, va + (vb - va) * u);
 
             a = pos;
             ua = u;
@@ -270,12 +287,14 @@ impl StrokeBuilder {
         }
     }
 
-    fn emit(&mut self, pos: Vec2, pressure: f32) {
+    fn emit(&mut self, pos: Vec2, pressure: f32, speed: f32) {
         let p = pressure.clamp(0.0, 1.0);
-        let size = self.size * self.preset.pressure_to_size.eval(p);
 
-        // 三個 jitter 一律抽、一律照同一順序——即使參數是 0.0。抽或不抽若取決於參數，
-        // 調一次 jitter 就會連帶改變後面每個 dab 的隨機序列。
+        // 語意方向：**速度越快，size 越小**；欄位值是耦合強度。
+        let v = (speed / REFERENCE_SPEED).clamp(0.0, 1.0);
+        let taper = 1.0 - self.preset.velocity_to_size * v;
+        let size = self.size * self.preset.pressure_to_size.eval(p) * taper;
+
         let (jx, jy, jsize, jangle) = (
             self.rng.next_signed(),
             self.rng.next_signed(),
@@ -287,7 +306,7 @@ impl StrokeBuilder {
         self.dabs.push(Dab {
             pos: pos + Vec2::new(jx, jy) * (preset.jitter_pos * size),
             size: size * (1.0 + preset.jitter_size * jsize),
-            angle: preset.jitter_angle * jangle * std::f32::consts::PI,
+            angle: preset.jitter_angle * jangle * std::f32::consts::PI + 0.0,
             alpha: (preset.flow * preset.pressure_to_opacity.eval(p)).clamp(0.0, 1.0),
             tip: preset.tip,
         });

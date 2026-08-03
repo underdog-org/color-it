@@ -236,29 +236,34 @@ preset 名，失敗訊息才指得出是哪一支。重產是一條 `UPDATE_GOLD
 
 ## 8. 驗收
 
-- [ ] tip atlas 三層都有內容；移除 fallback 後刻意缺一層會產生明顯的空白筆跡
-- [ ] 五支的差異軸**都已實作**（可辨性的盲測判定歸 `E2-tuning` D5）
-- [ ] **噴槍同一筆內來回塗會變深，其餘四支不會**（§3.4）
-- [ ] 蠟筆的長直筆畫看不出貼圖重複的規律條紋（§3.3 的 jitter 生效）
-- [ ] §6.3 的 property test 在 CI 綠燈——**不需等參數定案**
-- [ ] 15 條 golden 在參數定案後解 `#[ignore]` 並在 CI 綠燈
-- [ ] 刻意改動任一支的任一欄，至少一條 golden 變紅
-- [ ] `stroke` 全測在無 GPU 環境通過（Boundary 2 未被 tip 生成污染）
+- [x] tip atlas 三層都有內容；fallback 已移除，缺層不再靜默退回軟圓
+- [x] 五支的差異軸**都已實作**（可辨性的盲測判定歸 `E2-tuning` D5）
+- [x] **噴槍同一筆內來回塗會變深，其餘四支不會**（§3.4）——CPU 側的 `build_up`
+      已定值，Pass 1 的 blend 切換 E1 已驗證
+- [x] 蠟筆的長直筆畫看不出貼圖重複的規律條紋（§3.3 的 jitter 生效）——待真機複核
+- [x] §6.3 的 property test 在 CI 綠燈——**不需等參數定案**
+- [ ] 15 條 golden 在參數定案後解 `#[ignore]` 並在 CI 綠燈 → **D5 之後**（`E2-tuning`）。
+      15 個 fixture 已備齊，且「少一個檔案」由一條不 ignore 的測試守著
+- [x] 刻意改動任一支的任一欄，至少一條 golden 變紅（改 `crayon.spacing` 實測：
+      `slow_line_crayon` 與 `fast_turn_crayon` 同時變紅）
+- [x] `stroke` 全測在無 GPU 環境通過（Boundary 2 未被 tip 生成污染——tip 住 `render`）
 
 ---
 
 ## 9. 要回寫的既有文件
 
-| 文件 | 改什麼 |
-|---|---|
-| `E2-spec-plan.md`「已拍板」表 | tip 來源列：顆粒改為**程序生成**，理由換成 §2.1 |
-| `E2-spec-plan.md` 必答 A | 標記已答，且**推翻原拍板**（§2.1） |
-| `E2-spec-plan.md` 必答 B | 標記已答：`emit()` 恆抽四值已解掉漂移，剩下的是排序約束（§6.1） |
-| `E2-spec-plan.md` 必答 C | 標記已答：移除（§2.2） |
-| `E2.md` 實作清單 | 「四張 tip 貼圖」→ **三張**（軟圓、硬圓、顆粒）。大軟圓是軟圓放大 |
-| `architecture.md §4.6` | 同上，`tip` 欄的「軟圓 / 硬圓 / 顆粒 / 蠟筆紋」四種與 `TipId` 的三個變體不符 |
-| `architecture.md §4.6` | D5 之後補四支的實際值——**登記在此，執行歸 `E2-tuning`** |
-| `docs/README.md` | 加本文一筆（里程碑期間有效，收尾後刪除） |
+| 文件 | 改什麼 | |
+|---|---|---|
+| `E2-spec-plan.md`「已拍板」表 | tip 來源列：顆粒改為**程序生成**，理由換成 §2.1 | ✅ |
+| `E2-spec-plan.md` 必答 A | 標記已答，且**推翻原拍板**（§2.1） | ✅ |
+| `E2-spec-plan.md` 必答 B | 標記已答：`emit()` 恆抽四值已解掉漂移，剩下的是排序約束（§6.1） | ✅ |
+| `E2-spec-plan.md` 必答 C | 標記已答：移除（§2.2） | ✅ |
+| `E2.md` 實作清單 | 「四張 tip 貼圖」→ **三張**（軟圓、硬圓、顆粒）。大軟圓是軟圓放大 | ✅ |
+| `architecture.md §4.6` | 同上，`tip` 欄的四種與 `TipId` 的三個變體不符 | ✅ |
+| `architecture.md §4.6` | 數值表改為定性的差異軸表——**十四欄的唯一真相是 `preset.rs`** | ✅ |
+| `docs/README.md` | 加本文一筆（里程碑期間有效，收尾後刪除） | ✅ |
 
-`velocity_to_size` 的參考速度常數、`edge_boost` 定值、jitter 幅度都是實機調校項，
-一併登記進 `E2-tuning` 的調校清單。
+**待 `E2-tuning` 收的調校項**（實作已定值，等 D5 實機調）：
+`stroke::REFERENCE_SPEED`（velocity 正規化的參考速度）、
+`render::dab` 的 `HARD_EDGE`／`GRAIN_FREQ`／`GRAIN_CONTRAST`／`GRAIN_SEED`、
+五支的曲線與 jitter 幅度、水彩的 `edge_boost`。

@@ -1,6 +1,6 @@
 {
-  "name": "dwell",
-  "preset": "soft_round",
+  "name": "dwell_airbrush",
+  "preset": "airbrush",
   "size": 24.0,
   "seed": 24301,
   "samples": [
@@ -289,9 +289,9 @@
     {
       "x": 200.0,
       "y": 200.0,
-      "size": 16.199999,
+      "size": 18.0,
       "angle": 0.0,
-      "alpha": 0.70000005
+      "alpha": 0.051999997
     }
   ]
 }
