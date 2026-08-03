@@ -85,6 +85,7 @@ M0 驗收「刻意在 `stroke` 加 wgpu 依賴時 lint 會失敗」**做成 xtas
 | 指令 | M0 狀態 |
 |---|---|
 | `lint-deps` | 實作（alias 定義在 `.cargo/config.toml`） |
+| `gen-torture` | 實作。決定性產生 `assets/source/torture-01/`，重跑逐位元相同（否則 LFS 每跑一次胖一份） |
 | `bake <dir>` | 指令位，body 回傳「M1 實作」錯誤訊息 |
 | `ios` | 指令位，同上（S0） |
 | `verify-generated` | 指令位，同上（S0） |
@@ -106,7 +107,9 @@ M0 驗收「刻意在 `stroke` 加 wgpu 依賴時 lint 會失敗」**做成 xtas
 
 ## 6. Git 與 toolchain
 
-- `.gitattributes`：`assets/source/** filter=lfs diff=lfs merge=lfs -text`
+- `.gitattributes`：`assets/source/** filter=lfs diff=lfs merge=lfs -text`，
+  但 `assets/source/**/*.json` 以 `!filter !diff !merge text` 排除——`meta.json` 是 150 bytes 的文字檔，
+  進 LFS 會讓 diff 不可讀，且 CI 用 `lfs: false` checkout 時只拿得到 pointer，讀不出 `category`
 - `.gitignore`：`/target`、`assets/packs/`、`apps/*/Generated/`、`apps/*/generated/`、`.DS_Store`
 - git-lfs 加進 `mise.toml`（目前未安裝），跟 kotlin / rust 一致由 mise 管
 - **toolchain 版本的 SSOT 是 `rust-toolchain.toml`**，mise 只負責把 rustup 裝起來——避免兩邊各 pin 一次

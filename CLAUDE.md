@@ -3,7 +3,12 @@
 iOS 著色 App。核心是「**受區域約束的塗抹**」——不是繪圖軟體。
 單人開發，v1 只有 iOS，38 週零 buffer。
 
-**當前**：M0 專案基建（W0–1，見 `docs/roadmap/M0.md`）。尚無程式碼。
+**當前**：M0 收尾（W0–1，見 `docs/roadmap/M0.md`）。基建與規格已定，`core/*` 仍是空殼。
+**M0 未結的兩件事**：`adventure-time-demo-1/flats.png` 待重做、繪師徵才 JD 待發。
+
+> 產品原名 `Color It`，2026-08-03 因商標衝突改名 **Colorlull**（`docs/specs/naming.md`）。
+> crate 前綴一併改為 `colorlull-*`，`lib.name` 短名不變（仍是 `use render::…`）。
+> 目錄名 `color-it/` 尚未改，`architecture.md §3` 的結構圖照現況寫。
 
 ## Bootstrapping
 
@@ -35,7 +40,7 @@ Android（v1 不做，目錄先固定）：Compose + SurfaceView
 `core/` colorpack stroke render document history oplog app-state engine｜
 `contracts/` 只放 uniffi 生不出來的契約｜`tools/baker`｜
 `apps/` ios android web（Platform Bridge 各自獨立 target/module）｜
-`assets/` source=LFS、packs 不進 git
+`assets/` source PNG=LFS（`meta.json` 除外）、packs 不進 git
 
 ## 別提議
 

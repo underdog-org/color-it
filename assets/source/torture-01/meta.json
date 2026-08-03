@@ -1,0 +1,6 @@
+{
+  "id": "torture-01",
+  "title": "Torture Test 01",
+  "category": "mandala",
+  "notes": "由 `cargo xtask gen-torture` 決定性產生，不是繪師交付。刻意含細碎區域、單像素縫隙與面積 < 200px 碎片，用來壓 baker 的區域抽取。4:5 且無 shade，跑 has_shade = false 那條路徑。category 取 mandala 只因幾何圖形最接近，不代表難度分級。"
+}

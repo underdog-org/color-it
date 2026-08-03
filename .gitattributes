@@ -1,2 +1,6 @@
 # 繪師交付的來源 PNG 走 Git LFS（architecture.md §12.2）
 assets/source/** filter=lfs diff=lfs merge=lfs -text
+
+# 但 meta.json 不進 LFS——它是 150 bytes 的文字檔，進了 LFS 會讓 diff 讀不到，
+# 且 CI 以 `lfs: false` checkout（build-infra.md §5）時只會拿到 pointer，讀不出 category。
+assets/source/**/*.json !filter !diff !merge text

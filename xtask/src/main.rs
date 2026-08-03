@@ -2,6 +2,7 @@
 
 mod metadata;
 mod policy;
+mod torture;
 
 use std::path::PathBuf;
 
@@ -21,6 +22,8 @@ struct Cli {
 enum Command {
     /// 檢查 crate 依賴是否符合 xtask/deps-policy.toml
     LintDeps,
+    /// 決定性產生 torture test 素材 → assets/source/torture-01/
+    GenTorture,
     /// 執行 baker
     Bake {
         /// 素材來源目錄
@@ -35,6 +38,7 @@ enum Command {
 fn main() -> Result<()> {
     match Cli::parse().command {
         Command::LintDeps => lint_deps(),
+        Command::GenTorture => torture::run(&metadata::load()?.root),
         Command::Bake { .. } => {
             bail!("cargo xtask bake 尚未實作（M1）。流程見 docs/architecture.md §9.2")
         }

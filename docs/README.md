@@ -11,8 +11,9 @@
 | [prd.md](./prd.md) | **要做什麼、為什麼** — 產品定位、原則、體驗、範圍 | 567 行 |
 | [architecture.md](./architecture.md) | **怎麼做** — 技術選型、分層、渲染、契約、持久化 | 1368 行 |
 | [roadmap/](./roadmap/README.md) | **什麼時候做、做完怎麼算** — 12 個里程碑 ＋ 決策點 | 每份 38–90 行 |
-| [specs/assets-spec.md](./specs/assets-spec.md) | 繪師交付規格（PNG ＋ meta.json 硬性要求） | 319 行 |
-| [specs/build-infra.md](./specs/build-infra.md) | workspace 佈局、依賴 lint 規則、CI 形狀（M0 基建） | 109 行 |
+| [specs/assets-spec.md](./specs/assets-spec.md) | 繪師交付規格（PNG ＋ meta.json 硬性要求） | v1.1 |
+| [specs/build-infra.md](./specs/build-infra.md) | workspace 佈局、依賴 lint 規則、CI 形狀（M0 基建） | 短 |
+| [specs/naming.md](./specs/naming.md) | 產品名稱決策記錄（為何不叫 Color It）＋ 上架前必補的查證項 | 短 |
 
 `roadmap/` 已全部拆檔，一次只讀需要的那一份。
 
@@ -48,6 +49,7 @@
 | 動 R2、備份、雲端 | `§11` 雲端 |
 | 動 CI / 建置流程 | `§12` 建置與 CI ＋ `specs/build-infra.md` |
 | 動 workspace 骨架、依賴 lint、xtask 指令 | `specs/build-infra.md` |
+| 產品叫什麼、名稱還有哪些沒查 | `specs/naming.md` |
 | 效能目標、量測 | `§13` 效能觀測 |
 | 風險與退路 | `§14` |
 
