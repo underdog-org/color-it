@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+- `docs/specs/baker-seeds.md` 草案：繪師交付從「四張圖，其中兩張要像素級精確」改為
+  「線稿 ＋ 色標圖」。`flats.png` / `reference.png` 刪除，區域改由線稿封閉區 flood fill 推導，
+  色點顏色一色兩用（識別 ＋ 建議配色）。抗鋸齒、漏填細縫、色彩管理三類退件原因整批消失。
+  `.colorpack` 格式與 App 端零改動。**Phase 0 要先用現有 demo 素材驗證線稿封閉性**，
+  否決則退回「保留 flats ＋ baker 端量化 snap」的退路
+
 ## [v0.2]
 
 - iOS 骨架落地：`apps/ios/ColorApp.xcodeproj` 三個 target（App Shell／`EngineBridge` framework／`EngineBridgeTests`），
