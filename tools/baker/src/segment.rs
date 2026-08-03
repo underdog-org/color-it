@@ -1,5 +1,6 @@
 //! 唯一色掃描 → connected components → RegionMap（`specs/baker-core-design.md §2.1`）。
 
+use std::cmp::Reverse;
 use std::collections::HashMap;
 
 use crate::seeds::Seed;
@@ -173,11 +174,6 @@ pub struct Grown {
     pub on_line: Vec<u32>,
 }
 
-/// 逐 seed 4-連通 flood fill，只走非線像素。
-///
-/// 用逐 seed 而非多源同步 BFS：線稿封閉時兩者等價，不封閉時只有逐 seed
-/// 能指出「哪兩個 seed 連在一起」。同步 BFS 會在中間切一條任意分界線然後
-/// 靜默通過——那正是要避免的失敗模式（`baker-seeds §3.1 ①`）。
 pub fn grow(seeds: &[Seed], line: &[bool], width: u32, height: u32) -> Grown {
     let (w, h) = (width as usize, height as usize);
     let mut labels = vec![UNASSIGNED; w * h];
@@ -229,6 +225,119 @@ pub fn grow(seeds: &[Seed], line: &[bool], width: u32, height: u32) -> Grown {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Orphan {
+    pub area: u32,
+    /// raster order 的第一個像素。診斷座標用，不需要是重心。
+    pub anchor: (u32, u32),
+}
+
+/// 沒有任何 seed 認領的自由區（非線像素且未指派）的 4-連通塊。
+///
+/// **必須在 `close` 之前呼叫**——`close` 會把 id 擴散進這些區域，之後就找不到了。
+/// 回傳依面積遞減排序，平手取 anchor 的 raster order（§5「可疑度排序」）。
+pub fn find_orphans(labels: &[u32], line: &[bool], width: u32, height: u32) -> Vec<Orphan> {
+    let (w, h) = (width as usize, height as usize);
+    let mut seen = vec![false; w * h];
+    let mut out = Vec::new();
+    let mut stack: Vec<usize> = Vec::new();
+
+    let free = |i: usize| !line[i] && labels[i] == UNASSIGNED;
+
+    for start in 0..w * h {
+        if seen[start] || !free(start) {
+            continue;
+        }
+        let mut area = 0u32;
+        seen[start] = true;
+        stack.push(start);
+        while let Some(p) = stack.pop() {
+            area += 1;
+            let (x, y) = (p % w, p / w);
+            let mut visit = |n: usize, stack: &mut Vec<usize>| {
+                if !seen[n] && free(n) {
+                    seen[n] = true;
+                    stack.push(n);
+                }
+            };
+            if x > 0 {
+                visit(p - 1, &mut stack);
+            }
+            if x + 1 < w {
+                visit(p + 1, &mut stack);
+            }
+            if y > 0 {
+                visit(p - w, &mut stack);
+            }
+            if y + 1 < h {
+                visit(p + w, &mut stack);
+            }
+        }
+        out.push(Orphan {
+            area,
+            anchor: ((start % w) as u32, (start / w) as u32),
+        });
+    }
+
+    out.sort_by_key(|o| (Reverse(o.area), o.anchor.1, o.anchor.0));
+    out
+}
+
+/// 同步 BFS 波前：每輪把所有「與已標記像素相鄰的未指派像素」一次指派完，
+/// 取鄰居中**最小的 id**。
+///
+/// 同步是為了確定性——逐像素推進的話結果依賴掃描順序，golden test 守不住。
+/// 取最小 id 讓等距處的分界線有唯一解，視覺上落在線的中軸。
+///
+/// 回傳 `(輪數, 收斂後仍未指派的像素數)`。剩餘量非 0 代表整張圖有連一個 seed
+/// 都碰不到的孤島。
+pub fn close(labels: &mut [u32], width: u32, height: u32) -> (u32, u32) {
+    let (w, h) = (width as usize, height as usize);
+    let mut rounds = 0u32;
+    let mut pending: Vec<(usize, u32)> = Vec::new();
+
+    loop {
+        pending.clear();
+        for p in 0..w * h {
+            if labels[p] != UNASSIGNED {
+                continue;
+            }
+            let (x, y) = (p % w, p / w);
+            let mut best = UNASSIGNED;
+            let consider = |n: usize, best: &mut u32| {
+                if labels[n] != UNASSIGNED {
+                    *best = (*best).min(labels[n]);
+                }
+            };
+            if x > 0 {
+                consider(p - 1, &mut best);
+            }
+            if x + 1 < w {
+                consider(p + 1, &mut best);
+            }
+            if y > 0 {
+                consider(p - w, &mut best);
+            }
+            if y + 1 < h {
+                consider(p + w, &mut best);
+            }
+            if best != UNASSIGNED {
+                pending.push((p, best));
+            }
+        }
+        if pending.is_empty() {
+            break;
+        }
+        for &(p, id) in &pending {
+            labels[p] = id;
+        }
+        rounds += 1;
+    }
+
+    let left = labels.iter().filter(|&&v| v == UNASSIGNED).count() as u32;
+    (rounds, left)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -278,6 +387,62 @@ mod tests {
         let line = vec![false, false, true, false, false];
         let g = grow(&[seed(0, 0)], &line, 5, 1);
         assert_eq!(g.labels, vec![0, 0, UNASSIGNED, UNASSIGNED, UNASSIGNED]);
+    }
+
+    /// 沒有 seed 的封閉區被列為孤兒，面積遞減排序。
+    #[test]
+    fn unseeded_areas_are_listed_largest_first() {
+        // 7x1：[有主][線][孤兒 x1][線][孤兒 x3]
+        let line = vec![false, true, false, true, false, false, false];
+        let labels = vec![
+            0,
+            UNASSIGNED,
+            UNASSIGNED,
+            UNASSIGNED,
+            UNASSIGNED,
+            UNASSIGNED,
+            UNASSIGNED,
+        ];
+        let orphans = find_orphans(&labels, &line, 7, 1);
+        assert_eq!(orphans.len(), 2);
+        assert_eq!(orphans[0].area, 3);
+        assert_eq!(orphans[0].anchor, (4, 0));
+        assert_eq!(orphans[1].area, 1);
+        assert_eq!(orphans[1].anchor, (2, 0));
+    }
+
+    /// 線像素本身不是孤兒——它們由 `close` 指派。
+    #[test]
+    fn line_pixels_are_not_orphans() {
+        let line = vec![false, true, false];
+        let labels = vec![0, UNASSIGNED, 1];
+        assert!(find_orphans(&labels, &line, 3, 1).is_empty());
+    }
+
+    /// `close` 把線像素瓜分給兩側，平手取較小 id——確定性的來源。
+    #[test]
+    fn close_splits_the_line_and_breaks_ties_toward_the_smaller_id() {
+        // 4x1：[0][線][線][1]，兩個線像素各由一側吃掉
+        let mut labels = vec![0, UNASSIGNED, UNASSIGNED, 1];
+        let (rounds, left) = close(&mut labels, 4, 1);
+        assert_eq!(labels, vec![0, 0, 1, 1]);
+        assert_eq!((rounds, left), (1, 0));
+    }
+
+    /// 寬度為奇數的線：正中央的像素兩側等距，必須歸較小 id。
+    #[test]
+    fn the_middle_of_an_odd_width_line_goes_to_the_smaller_id() {
+        let mut labels = vec![0, UNASSIGNED, UNASSIGNED, UNASSIGNED, 1];
+        let (rounds, left) = close(&mut labels, 5, 1);
+        assert_eq!(labels, vec![0, 0, 0, 1, 1], "第 2 輪時中央同時鄰接 0 與 1，取 0");
+        assert_eq!((rounds, left), (2, 0));
+    }
+
+    /// 一個 seed 都沒有 → 沒有東西可以擴散，回報剩餘量而不是無限迴圈。
+    #[test]
+    fn close_terminates_when_there_is_nothing_to_grow_from() {
+        let mut labels = vec![UNASSIGNED; 4];
+        assert_eq!(close(&mut labels, 4, 1), (0, 4));
     }
 
     fn rgba(pixels: &[[u8; 3]]) -> Vec<u8> {
