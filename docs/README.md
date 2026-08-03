@@ -1,4 +1,4 @@
-# Color It — 文件索引
+# Colorlull — 文件索引
 
 > **這份索引是給 agent 與人類共用的導航表。**
 > 三份主文件都很長（PRD 567 行、Architecture 1368 行），**不要整份載入**——

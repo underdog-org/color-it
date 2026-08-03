@@ -1,4 +1,4 @@
-# Color It — 架構設計文件
+# Colorlull — 架構設計文件
 
 > 狀態：草案 v0.1（2026-08-03）
 > 相關文件：[prd.md](./prd.md)｜[roadmap/](./roadmap/README.md)｜[assets-spec.md](./specs/assets-spec.md)

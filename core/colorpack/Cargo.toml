@@ -1,5 +1,5 @@
 [package]
-name = "colorit-colorpack"
+name = "colorlull-colorpack"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true

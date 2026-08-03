@@ -1,5 +1,5 @@
 [package]
-name = "colorit-document"
+name = "colorlull-document"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
@@ -11,5 +11,5 @@ name = "document"
 workspace = true
 
 [dependencies]
-colorit-colorpack = { workspace = true }
-colorit-oplog = { workspace = true }
+colorlull-colorpack = { workspace = true }
+colorlull-oplog = { workspace = true }

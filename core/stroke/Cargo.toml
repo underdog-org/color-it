@@ -1,5 +1,5 @@
 [package]
-name = "colorit-stroke"
+name = "colorlull-stroke"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
@@ -11,4 +11,4 @@ name = "stroke"
 workspace = true
 
 [dependencies]
-colorit-colorpack = { workspace = true }
+colorlull-colorpack = { workspace = true }

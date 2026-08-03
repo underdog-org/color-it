@@ -1,4 +1,4 @@
-//! Color It 的建置協調。指令清單見 `docs/architecture.md §12.1`。
+//! Colorlull 的建置協調。指令清單見 `docs/architecture.md §12.1`。
 
 mod metadata;
 mod policy;
@@ -11,7 +11,7 @@ use clap::{Parser, Subcommand};
 const POLICY_FILE: &str = "xtask/deps-policy.toml";
 
 #[derive(Parser)]
-#[command(name = "xtask", about = "Color It 建置協調")]
+#[command(name = "xtask", about = "Colorlull 建置協調")]
 struct Cli {
     #[command(subcommand)]
     command: Command,

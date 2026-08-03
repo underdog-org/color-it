@@ -1,4 +1,4 @@
-# Color It - Changelog
+# Colorlull - Changelog
 
 ## [Unreleased]
 
@@ -6,7 +6,7 @@
 - `cargo xtask lint-deps`：宣告式 `deps-policy.toml` 強制依賴方向與「wgpu 只在 render」（鐵律 1），違規一次全報
 - GitHub Actions CI：單一 workflow，觸發路徑為 §12.3 三條 ＋ `xtask/**` ＋ workspace manifest ＋ workflow 自身
 - 新增 `docs/specs/build-infra.md`：workspace 佈局、lint 規則、CI 形狀
-- package name 用 `colorit-*` ＋ 短 `lib.name`，避開 crates.io 撞名
+- package name 用 `colorlull-*` ＋ 短 `lib.name`，避開 crates.io 撞名
 - toolchain 版本 pin 的 SSOT 定為 `rust-toolchain.toml`，mise 只負責裝 rustup
 
 ## v0.1 (2026-08-03)

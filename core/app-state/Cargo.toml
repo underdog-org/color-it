@@ -1,5 +1,5 @@
 [package]
-name = "colorit-app-state"
+name = "colorlull-app-state"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true

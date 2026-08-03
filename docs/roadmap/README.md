@@ -1,4 +1,4 @@
-# Color It — 開發路線圖
+# Colorlull — 開發路線圖
 
 > 狀態：草案 v0.1（2026-08-03）｜相關：[prd.md](../prd.md)｜[architecture.md](../architecture.md)
 >

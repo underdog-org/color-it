@@ -10,14 +10,14 @@ publish = false
 [workspace.dependencies]
 # --- 內部（core/*）---
 # 依賴方向由 xtask/deps-policy.toml 強制，見 docs/specs/build-infra.md
-colorit-colorpack = { path = "core/colorpack" }
-colorit-stroke = { path = "core/stroke" }
-colorit-render = { path = "core/render" }
-colorit-document = { path = "core/document" }
-colorit-history = { path = "core/history" }
-colorit-oplog = { path = "core/oplog" }
-colorit-app-state = { path = "core/app-state" }
-colorit-engine = { path = "core/engine" }
+colorlull-colorpack = { path = "core/colorpack" }
+colorlull-stroke = { path = "core/stroke" }
+colorlull-render = { path = "core/render" }
+colorlull-document = { path = "core/document" }
+colorlull-history = { path = "core/history" }
+colorlull-oplog = { path = "core/oplog" }
+colorlull-app-state = { path = "core/app-state" }
+colorlull-engine = { path = "core/engine" }
 
 # --- 外部 ---
 anyhow = "1"

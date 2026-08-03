@@ -45,7 +45,7 @@ pub struct CratePolicy {
 /// 也違反「純 CPU、零 GPU 依賴」。
 #[derive(Debug, Clone)]
 pub struct CrateManifest {
-    /// policy key，即 package name 去掉 `colorit-` 前綴。
+    /// policy key，即 package name 去掉 `colorlull-` 前綴。
     pub key: String,
     pub package: String,
     pub internal: BTreeSet<String>,
@@ -142,7 +142,7 @@ mod tests {
     fn manifest(key: &str, internal: &[&str], external: &[&str]) -> CrateManifest {
         CrateManifest {
             key: key.to_string(),
-            package: format!("colorit-{key}"),
+            package: format!("colorlull-{key}"),
             internal: internal.iter().map(|s| s.to_string()).collect(),
             external: external.iter().map(|s| s.to_string()).collect(),
         }
@@ -204,7 +204,7 @@ mod tests {
             check(&policy(FIXTURE), &manifests),
             vec![Violation::Unregistered {
                 key: "document".into(),
-                package: "colorit-document".into(),
+                package: "colorlull-document".into(),
             }]
         );
     }

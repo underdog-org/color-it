@@ -16,9 +16,9 @@ xtask/                  bin
 M0 的 crate 全是空殼：`Cargo.toml` ＋ 空 `lib.rs`，**但依賴邊要照 §5.1 連好**——
 依賴方向 lint 從第一天就有東西可驗，E1 開工時不必回頭改結構。
 
-**package name 用 `colorit-*`，`lib.name` 用短名。**
+**package name 用 `colorlull-*`，`lib.name` 用短名。**
 `render`、`document`、`history` 在 crates.io 都有人佔用。path dependency 本身不會解析錯，
-但 `cargo add` 一類的操作容易踩到。`colorit-render` ＋ `lib.name = "render"`
+但 `cargo add` 一類的操作容易踩到。`colorlull-render` ＋ `lib.name = "render"`
 讓程式碼裡仍是 `use render::…`。
 
 ## 2. 依賴矩陣

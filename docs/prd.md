@@ -1,7 +1,7 @@
-# Color It — 產品需求文件（PRD）
+# Colorlull — 產品需求文件（PRD）
 
 > 狀態：草案 v0.1（2026-08-03）
-> 產品名稱：**Color It**（暫定）
+> 產品名稱：**Colorlull**（2026-08-03 拍板，原名 `Color It` 因商標衝突棄用，見 [specs/naming.md](./specs/naming.md)）
 > 相關文件：[architecture.md](./architecture.md)｜[roadmap/](./roadmap/README.md)｜[assets-spec.md](./specs/assets-spec.md)
 >
 > **v1 平台：iOS only。** Android 移至 v1 之後，理由見 `roadmap/beyond-v1.md`。
@@ -10,11 +10,11 @@
 
 ## 1. 產品定位
 
-**Color It 是一款以高品質線稿為核心的著色 App，讓不會畫畫的人也能做出有創作感的作品。**
+**Colorlull 是一款以高品質線稿為核心的著色 App，讓不會畫畫的人也能做出有創作感的作品。**
 
-功能光譜的一端是純填色遊戲（點擊上色，門檻極低但沒有創作感），另一端是專業繪圖軟體（表現力強但門檻高）。Color It 站在中間——**用填色的門檻，換創作的成就感**。
+功能光譜的一端是純填色遊戲（點擊上色，門檻極低但沒有創作感），另一端是專業繪圖軟體（表現力強但門檻高）。Colorlull 站在中間——**用填色的門檻，換創作的成就感**。
 
-| | Happy Color 類 | 專業繪圖類 | **Color It** |
+| | Happy Color 類 | 專業繪圖類 | **Colorlull** |
 |---|---|---|---|
 | 核心動作 | 點擊填色 | 自由繪畫 | **點擊填色 ＋ 自由塗抹並存** |
 | 筆刷 | 無 | 數十至數百支 | **5 支，經過挑選** |
@@ -585,7 +585,7 @@ v1 只有 iOS，此限制在 v1 期間不存在。Android 版推出後，兩平�
 
 | # | 項目 | 影響 |
 |---|---|---|
-| A1 | 產品名稱 `Color It` 需做商標與 App Store 名稱可用性檢查 | 上架前置 |
+| A1 | ~~產品名稱可用性檢查~~ → **已於 M0 完成**：原名 `Color It` 遭活體商標阻擋，改名 **Colorlull**（`specs/naming.md`）。**殘留項**：`.app` 網域、App Store Connect 名稱保留、台灣 TIPO／EUIPO 檢索，上架前必須補 | 上架前置 |
 | A2 | 訂閱定價各地區價格層級（§7 的 `$4.99` 為假設值） | 上架前置。**S2 設定 soft launch 市場的層級，R1 補齊全市場**（`roadmap/S2.md`、`roadmap/R1.md`） |
 | A5 | 付費牆第三個進入點的 N 值（**已分享**第幾張後提示，見 §5.4） | 需上線後校準 |
 | A6 | **「封閉線稿」開關是否採用**——與 §4.1 的工具綁定設計衝突 | 建議在 D4（E1 結束）拍板 |

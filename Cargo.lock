@@ -220,68 +220,68 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1d07550c9036bf2ae0c684c4297d503f838287c83c53686d05370d0e139ae570"
 
 [[package]]
-name = "colorit-app-state"
+name = "colorlull-app-state"
 version = "0.1.0"
 
 [[package]]
-name = "colorit-baker"
+name = "colorlull-baker"
 version = "0.1.0"
 dependencies = [
  "anyhow",
 ]
 
 [[package]]
-name = "colorit-colorpack"
+name = "colorlull-colorpack"
 version = "0.1.0"
 
 [[package]]
-name = "colorit-document"
+name = "colorlull-document"
 version = "0.1.0"
 dependencies = [
- "colorit-colorpack",
- "colorit-oplog",
+ "colorlull-colorpack",
+ "colorlull-oplog",
 ]
 
 [[package]]
-name = "colorit-engine"
+name = "colorlull-engine"
 version = "0.1.0"
 dependencies = [
- "colorit-app-state",
- "colorit-document",
- "colorit-history",
- "colorit-render",
+ "colorlull-app-state",
+ "colorlull-document",
+ "colorlull-history",
+ "colorlull-render",
 ]
 
 [[package]]
-name = "colorit-history"
+name = "colorlull-history"
 version = "0.1.0"
 dependencies = [
- "colorit-colorpack",
- "colorit-oplog",
+ "colorlull-colorpack",
+ "colorlull-oplog",
 ]
 
 [[package]]
-name = "colorit-oplog"
+name = "colorlull-oplog"
 version = "0.1.0"
 dependencies = [
- "colorit-colorpack",
+ "colorlull-colorpack",
 ]
 
 [[package]]
-name = "colorit-render"
+name = "colorlull-render"
 version = "0.1.0"
 dependencies = [
  "bytemuck",
- "colorit-colorpack",
- "colorit-stroke",
+ "colorlull-colorpack",
+ "colorlull-stroke",
  "wgpu",
 ]
 
 [[package]]
-name = "colorit-stroke"
+name = "colorlull-stroke"
 version = "0.1.0"
 dependencies = [
- "colorit-colorpack",
+ "colorlull-colorpack",
 ]
 
 [[package]]

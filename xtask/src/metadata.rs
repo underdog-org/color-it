@@ -33,10 +33,10 @@ pub struct Workspace {
     pub manifests: Vec<CrateManifest>,
 }
 
-/// package name → policy key：去掉 `colorit-` 前綴（`xtask` 本來就沒有）。
+/// package name → policy key：去掉 `colorlull-` 前綴（`xtask` 本來就沒有）。
 fn policy_key(package: &str) -> String {
     package
-        .strip_prefix("colorit-")
+        .strip_prefix("colorlull-")
         .unwrap_or(package)
         .to_string()
 }
@@ -90,8 +90,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn strips_colorit_prefix() {
-        assert_eq!(policy_key("colorit-app-state"), "app-state");
+    fn strips_colorlull_prefix() {
+        assert_eq!(policy_key("colorlull-app-state"), "app-state");
         assert_eq!(policy_key("xtask"), "xtask");
     }
 }

@@ -1,4 +1,4 @@
-# Color It
+# Colorlull
 
 iOS 著色 App。核心是「**受區域約束的塗抹**」——不是繪圖軟體。
 單人開發，v1 只有 iOS，38 週零 buffer。
