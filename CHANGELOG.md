@@ -12,6 +12,15 @@
 - **修正 spec**：`T_line`／`T_shade` 以畫布 UV 取樣而非螢幕 UV（letterbox 時才會顯形，已用左右異色線稿釘住）
 - 回寫 `architecture.md`：§4.2 `erased` 的套用位置＋色彩空間、§4.4 Mode B 改為無條件通過（`REGION_LINEART` 不存在）、§4.5 擴散動畫補 `prev_color`
 
+**Stroke（E1）**
+- `core/stroke` 落地 `E1-stroke` §3–§6／§10：`Vec2`／`InputSample`／`Dab`／`Curve`／`BrushPreset` 十四欄＋五支 preset 登記、One-Euro（位置與 radius 各一組參數）、向心 Catmull-Rom（`alpha = 0.5`）、跨 segment 保留累積量的弧長取樣、`majorRadius` per-stroke 自適應正規化
+- **`StrokeBuilder`（串流）與 `generate_dabs`（批次）共用同一份實作**，§2.1 的等價因此由建構保證；等價與「同 seed 逐位元相同」設為 gate
+- 預測點走 `predicted_dabs`：複製一份 builder 狀態算完就丟，committed 狀態不被污染，§9 的抬筆重建因此不必特別處理
+- 32 條測試無 GPU 全綠（Boundary 2）。三條 golden fixture 標 `#[ignore]`（參數調校中，E2 定案後才 gate）；不 overshoot／不打結／原地停留只一個 dab／`opacity` 不烘進 dab 改以性質測試守，與參數值無關
+- **修正 spec**：`generate_dabs` 多一個 `size` 參數（`spacing × dab_size` 需要 px 基準）；`majorRadius` baseline 初值改為 `r ± R_EPS/2` 的帶狀，否則起筆壓感恆為 0，與 spec 自述的「應為中值」矛盾
+- 回寫 `architecture.md`：§4.6 `Curve` 定義＋軟圓筆初值表、§5.2 簽章、§5.3 補「向心」與 radius 濾波參數表、§10.2 補 `R_EPS` 與 per-stroke 的已知限制
+- 實作期間的八條決議記在 `E1-stroke.md §14`（交接用）
+
 - 繪師交付改為「線稿＋色標圖」，刪除 flats/reference，區域改由線稿封閉區 flood fill 推導；`.colorpack` 與 App 端零改動。Phase 0 需先驗證線稿封閉性，否決則退回「保留 flats ＋ baker 端量化 snap」
 
 ## [v0.2]

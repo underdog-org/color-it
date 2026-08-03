@@ -12,3 +12,9 @@ workspace = true
 
 [dependencies]
 colorlull-colorpack = { workspace = true }
+
+# golden fixture 的 JSON 只活在測試裡：`Dab` / `InputSample` 本身不 derive serde，
+# 免得序列化格式變成 lib 的公開契約（`E1-stroke.md §10`）。
+[dev-dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }

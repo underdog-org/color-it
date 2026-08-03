@@ -4,9 +4,12 @@ iOS 著色 App。核心是「**受區域約束的塗抹**」——不是繪圖�
 單人開發，v1 只有 iOS，38 週零 buffer。
 
 **當前**：M0／M1／S0 完成，進行中 **E1 手感垂直切片**（★最高風險，8 週時間盒，見 `docs/roadmap/E1.md`）。
-六份 E1 spec 寫了三份（`E1-wgpu` / `E1-composite` / `E1-stroke`，拆分依據在 `docs/specs/E1-spec-plan.md`），**還差 `E1-bucket` / `E1-input` / `E1-perf`**。
+六份 E1 spec **全部寫完**（`E1-wgpu` / `E1-composite` / `E1-stroke` / `E1-bucket` / `E1-input` / `E1-perf`，拆分依據在 `docs/specs/E1-spec-plan.md`；先讀 `E1-wgpu`，其餘五份以它為共同輸入）。
 `core/render` 已落地 wgpu 起手（`Gpu`／`RenderContext`／`DocumentResources` 七資源＋`Buf_fill`／`MaskBinding`）與 **Pass 3 Composite**（`CompositePass`、`shaders/composite.wgsl` 六層），22 條測試在真 GPU 上跑。
-**下一步**：Pass 1／2（`E1-stroke.md`）與油漆桶 CPU 側（`E1-bucket`，動畫推進與 `prev_color` 寫入）。
+`core/stroke` 已落地 **§3–§6／§10**：One-Euro → 向心 Catmull-Rom → 弧長取樣 → `Dab`，`StrokeBuilder`
+串流版與 `generate_dabs` 批次版共用同一份實作，32 條測試無 GPU 全綠（三條 golden 標 `#[ignore]`，參數調校中）。
+**下一步**：油漆桶（`E1-bucket`：`core/document` 最小 apply ＋ 動畫推進）→ 輸入與 FrameDriver（`E1-input`）→ Pass 1／2（`E1-stroke §7`–`§9`）。
+> Pass 1／2 或 `engine` 接線動工前**先讀 `E1-stroke.md §14` 執行期決議**——`engine` → `stroke` 還不在 `deps-policy.toml` 裡。
 > `attach_surface` 需要真的 `CAMetalLayer`，無自動測試，等接上 iOS 端才驗得到。
 > M0 交出第一份 `.colorpack` 之前，composite 與 `thumb.jpg` 的逐像素比對做不了（`E1-composite §9` 第 1 條）。
 

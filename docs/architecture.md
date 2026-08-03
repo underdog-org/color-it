@@ -489,6 +489,24 @@ pub struct BrushPreset {
 | 噴槍 | 大軟圓 | 0.02 | Normal | **true** | 0 |
 | 水彩 | 軟圓 | 0.06 | Multiply | **true** | **> 0**（初值待 E2 調校） |
 
+`Curve` 是三個參數、無編輯器、完全決定性（定義出處 `E1-stroke.md §6`）：
+
+```rust
+pub struct Curve { pub min: f32, pub max: f32, pub gamma: f32 }
+// out = min + (max - min) * p.powf(gamma)
+```
+
+不用 LUT 或貝茲：`prd.md` 的 Don't Have 禁止使用者編輯筆刷參數，所以曲線只需要
+「表達得出五支 preset 的差異」，不需要可編輯性。
+
+**軟圓筆的初值**（E1 唯一實作的一支，其餘四支的曲線待 E2 調校）：
+
+| 欄位 | 值 | | 欄位 | 值 |
+|---|---|---|---|---|
+| `pressure_to_size` | `{ 0.35, 1.0, 1.0 }` | | `flow` | 1.0 |
+| `pressure_to_opacity` | `{ 0.40, 1.0, 1.0 }` | | `opacity` | 0.85 |
+| `velocity_to_size` / `tilt_to_size` | 0.0（E2） | | 三個 `jitter_*` | 0.0 |
+
 **兩支筆刷的實作風險要先寫下來**：
 
 | Preset | 風險 |
@@ -576,7 +594,8 @@ if (textureLoad(T_paint, coord).a > 0.5) {
 pub fn generate_dabs(
     samples: &[InputSample],
     preset: &BrushPreset,
-    seed: u32,
+    size: f32,          // 筆刷直徑 px（Tool::Brush.size）。沒有它，弧長門檻
+    seed: u32,          // spacing × dab_size 算不出 px（E1-stroke.md §14 決議 E）
 ) -> Vec<Dab>;
 
 pub struct InputSample {
@@ -606,10 +625,23 @@ pub struct Dab {
 ### 5.3 輸入處理鏈
 
 ```
-原始 sample → One-Euro filter 平滑 → Catmull-Rom 插值 → 依 spacing 取樣 → Dab
+原始 sample → One-Euro filter 平滑 → 向心 Catmull-Rom 插值 → 依 spacing 取樣 → Dab
 ```
 
-One-Euro filter 的參數需實機調校：太強會有「拖尾感」，太弱會有抖動。
+**向心**（`alpha = 0.5`）不是均勻參數化：均勻版在樣本間距差異大時會 overshoot 與打結，
+手指快速轉向時必然發生（`E1-stroke.md §4.2`）。
+
+One-Euro filter **位置與 radius 各一組參數**，都需實機調校：太強會有「拖尾感」，太弱會有抖動。
+
+| | 位置 | radius |
+|---|---|---|
+| `min_cutoff` | 1.0 Hz | 0.5 Hz |
+| `beta` | 0.05 | 0.0 |
+| `d_cutoff` | 1.0 Hz | 1.0 Hz |
+
+radius 用更低的 cutoff、`beta = 0`：接觸半徑本身就抖，而它驅動的是筆寬，
+抖動在視覺上比位置抖動更明顯，且 radius 沒有「快速移動時要更跟手」的需求。
+**`dt` 一律從 `InputSample.t` 取，不可假設固定**——coalesced touch 的間隔不均勻。
 
 ---
 
@@ -1310,6 +1342,17 @@ App Shell 只依賴 `EngineProtocol`。引擎完成後把 `MockEngine` 換成 `R
 `BrushPreset` 的曲線定義完全不需要改，差異只在 `pressure` 的來源。
 
 **正規化必須自適應。** `majorRadius` 的絕對值因手指大小而異，不能用固定的 min/max。以 per-stroke 的 running baseline 或使用者層級的長期基線做正規化，具體參數需實機調校（與 One-Euro filter 的參數一起，列在 E1）。
+
+E1 的落地版（`E1-stroke.md §5`、§14 決議 F）：
+
+```
+pressure = clamp((r - r_min) / max(r_max - r_min, R_EPS), 0, 1)
+初值 r_min = r₀ - R_EPS/2，r_max = r₀ + R_EPS/2   ← 帶狀，起筆因此得中值 0.5
+R_EPS = 4.0（點），實機調校
+```
+
+**E1 只做 per-stroke，跨 session 的使用者層級基線列為 E2 之後的候選。** 已知限制：
+一筆之內若力道單調遞增，`r_min` 永遠是起筆值，壓感範圍會被壓縮。
 
 輔助的動態來源（皆已在 `BrushPreset` 中）：**速度**（`velocity_to_size`，快 → 細）與**停留時間**（`build_up = true` 的天然行為，對噴槍特別有效）。
 

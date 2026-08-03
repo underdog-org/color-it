@@ -3,6 +3,9 @@
 > 狀態：草案（2026-08-03）｜里程碑：[E1](../roadmap/E1.md)｜計畫：[E1-spec-plan](./E1-spec-plan.md)
 >
 > 資源與 pass ↔ 資源矩陣見 [E1-wgpu](./E1-wgpu.md)；色彩空間見 [E1-composite](./E1-composite.md) §2。
+>
+> **實作進度**：§3–§6、§10 的 `core/stroke` 已落地；§7–§9 的 Pass 1／Pass 2 尚未動工。
+> 動工前先讀 **§14 執行期決議**。
 
 ## 涵蓋 `E1.md` 的哪幾條
 
@@ -76,10 +79,10 @@ radius == 0.0 →  觸控筆。直接用 pressure
 ## 3. `generate_dabs` 契約
 
 ```rust
-pub fn generate_dabs(samples: &[InputSample], preset: &BrushPreset, seed: u32) -> Vec<Dab>;
+pub fn generate_dabs(samples: &[InputSample], preset: &BrushPreset, size: f32, seed: u32) -> Vec<Dab>;
 ```
 
-型別逐字照 `architecture.md §5.2`，不改。`seed` 讓 jitter 可重現，
+型別照 `architecture.md §5.2`，**只多一個 `size`**（決議 E，§14）。`seed` 讓 jitter 可重現，
 否則 E3 的縮時重播會與原作不同。
 
 **`samples` 必須已經濾除 `predicted: true`。** 純函式不知道預測是什麼。
@@ -308,10 +311,28 @@ bbox 大小的暫存層、每 frame 清掉，再與 `T_wet` 一起合成。
 
 ## 13. 要回寫的既有文件
 
-| 文件 | 改什麼 |
-|---|---|
-| `E1-composite.md §3` | `T_paint` 是 premultiplied alpha，第 ③ 層的 `over()` 要對應（§8） |
-| `contracts.md` ③ | 補 C9：`radius == 0` 表示觸控筆，`> 0` 表示手指（§2.2） |
-| `architecture.md §4.6` | `Curve` 的定義（§6）；補軟圓筆的初值表 |
-| `architecture.md §5.3` | 輸入處理鏈補「向心」與「radius 另一組濾波參數」（§4） |
-| `architecture.md §10.2` | 自適應正規化補 per-stroke 的已知限制與 `R_EPS`（§5） |
+| 文件 | 改什麼 | |
+|---|---|---|
+| `architecture.md §4.6` | `Curve` 的定義（§6）；補軟圓筆的初值表 | ✅ |
+| `architecture.md §5.2` | `generate_dabs` 多一個 `size` 參數（決議 E） | ✅ |
+| `architecture.md §5.3` | 輸入處理鏈補「向心」與「radius 另一組濾波參數」（§4） | ✅ |
+| `architecture.md §10.2` | 自適應正規化補 per-stroke 的已知限制與 `R_EPS`（§5）；baseline 初值是 `r ± R_EPS/2` 的帶狀，不是 `r`（決議 F） | ✅ |
+| `E1-composite.md §3` | `T_paint` 是 premultiplied alpha，第 ③ 層的 `over()` 要對應（§8） | Pass 2 落地時 |
+| `contracts.md` ③ | 補 C9：`radius == 0` 表示觸控筆，`> 0` 表示手指（§2.2） | 修正窗口在 E2／E3 |
+
+---
+
+## 14. 執行期決議（交接）
+
+實作 §3–§6 時遇到、spec 沒答的問題。**後續 Agent 直接照這節做，不要重新發明。**
+
+| | 問題 | 決議 |
+|---|---|---|
+| A | `app_state::BrushPreset`（五支 enum，＝筆刷 ID）與本文的 `BrushPreset`（十四欄參數 struct）**同名不同物** | 兩個都留。`stroke` 是參數的唯一出處；`stroke` **不依賴 `app-state`**（它是同層 crate，不在 `stroke` 的下游），所以 enum → 參數的對應寫在 `engine` |
+| B | `architecture.md §5.2` 的 `Vec2` 全 workspace 不存在，也沒有數學 crate | 定義在 `stroke::math`。不引 glam：只需要 add/sub/mul/lerp/length |
+| C | `engine` → `stroke` 不在 `deps-policy.toml`，而 §2 把扁平 → `Vec2` 的轉換派給 `engine` | **本段不動 policy**。轉換與 `begin/append/end_stroke` 的接線延到 Pass 1/2 落地時一併做（改 policy ＝ 改架構，要單獨一次） |
+| D | §10「E1 不設為 CI gate」需要一個機制 | 三條 golden 標 `#[ignore]`；`UPDATE_GOLDEN=1 cargo test -p colorlull-stroke --test golden -- --ignored` 重新產生。§2.1 的等價測試與「同 seed 逐位元相同」**不標**，現在就是 gate |
+| E | `spacing` 是筆尖直徑比、`pressure_to_size` 是 0.35–1.0 倍率，但筆刷直徑住在 `AppState.size`，不在 `generate_dabs` 的簽章裡——弧長門檻算不出 px | 加 `size: f32` 參數，`Dab.size` 是 px 直徑。列入 §13 回寫 |
+| F | §5 的 baseline 初值寫「＝第一個樣本的 `r`」，但這樣起筆 `pressure` 恆為 0，與同段「此時應為中值」矛盾 | 公式不動，**初值改成 `r_min = r₀ - R_EPS/2`、`r_max = r₀ + R_EPS/2`**。起筆得 0.5，且 min/max 照樣單調外擴 |
+| G | `Dab` 要當 GPU instance 資料，會想加 `repr(C)` ＋ `bytemuck` | **不加**。`render` 自己定 `DabInstance` 與轉換，`stroke` 保持零版面配置知識（Boundary 2） |
+| H | 筆畫進行中 predicted 樣本也要產 dab，但 §2.1 的不變式只認真實樣本 | `StrokeBuilder::push` 只吃真實樣本；predicted 走 `predicted_dabs(&self, &[InputSample])`——複製一份 builder 狀態算完就丟，committed 狀態不被污染，§9 的重建因此不必特別處理 |
